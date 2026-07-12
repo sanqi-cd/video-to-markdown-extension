@@ -1,105 +1,105 @@
-# Video to Markdown Extension Implementation Plan
+# Video to Markdown 浏览器插件开发实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **面向执行者：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施本计划。所有步骤使用复选框（`- [ ]`）跟踪进度。
 
-**Goal:** Build an open-source Chrome extension that extracts existing YouTube and Bilibili subtitles and produces Chinese Markdown in high-fidelity or AI-refined mode.
+**目标：** 构建一个开源 Chrome 浏览器插件，提取 YouTube 和哔哩哔哩已有字幕，并以高保真或 AI 精炼模式生成中文 Markdown。
 
-**Architecture:** WXT provides the Manifest V3 shell. Platform-specific content scripts expose a shared `SubtitleAdapter` contract, the Side Panel owns the foreground task lifecycle, and the Service Worker owns model credentials and OpenAI-compatible requests. Pure processors normalize, chunk, validate, and render data so they can be tested without Chrome or live video sites.
+**架构：** WXT 提供 Manifest V3 插件外壳。各平台 Content Script 实现统一的 `SubtitleAdapter` 契约；Side Panel 管理前台任务生命周期；Service Worker 管理模型凭证和 OpenAI 兼容请求。字幕标准化、分块、校验与渲染均实现为纯函数，以便脱离 Chrome 和实时视频网站进行测试。
 
-**Tech Stack:** WXT, React, TypeScript strict, pnpm, Zod, Vitest, Testing Library, Playwright, ESLint, Prettier
+**技术栈：** WXT、React、TypeScript strict、pnpm、Zod、Vitest、Testing Library、Playwright、ESLint、Prettier
 
-## Global Constraints
+## 全局约束
 
-- Support Chrome 114 and later with Manifest V3 and `chrome.sidePanel`.
-- Support existing subtitle tracks on YouTube and Bilibili only.
-- Do not download video/audio or perform speech recognition in MVP.
-- Final documents contain Chinese only; English source text is not retained in the body.
-- Support OpenAI-compatible APIs through user-supplied API Key, HTTPS Base URL, and model name.
-- Keep API Key in `chrome.storage.local`; never send it to Content Scripts or include it in logs, errors, or exports.
-- Do not build accounts, cloud persistence, third-party note sync, background continuation after the Side Panel closes, or native Gemini/Claude protocols.
-- Use deterministic cleanup for Chinese high-fidelity output; do not ask a model to rewrite Chinese subtitles.
-- Treat every Content Script message and model response as untrusted input and validate it at runtime.
-- Use MIT License and keep generated artifacts, secrets, browser profiles, and local visualization sessions out of Git.
+- 使用 Manifest V3 和 `chrome.sidePanel`，最低支持 Chrome 114。
+- 仅支持 YouTube 和哔哩哔哩已有字幕轨道。
+- MVP 不下载视频或音频，也不执行语音识别。
+- 最终文档仅包含中文，正文不保留英文原文。
+- 通过用户提供的 API Key、HTTPS Base URL 和模型名称调用 OpenAI 兼容接口。
+- API Key 仅保存到 `chrome.storage.local`，不得发送给 Content Script，也不得出现在日志、错误或导出内容中。
+- 不建设产品账号、云端持久化、第三方笔记同步、Side Panel 关闭后的后台续跑，以及 Gemini/Claude 原生协议。
+- 中文高保真模式使用确定性清洗，不调用模型改写中文字幕。
+- 所有 Content Script 消息和模型响应均视为不可信输入，必须进行运行时校验。
+- 使用 MIT License；生成产物、密钥、浏览器配置和本地可视化会话不得进入 Git。
 
 ---
 
-## File and Module Map
+## 文件与模块职责图
 
 ```text
 entrypoints/
-  background.ts                 privileged message router and model calls
-  youtube.content.ts            isolated-world YouTube bridge
-  youtube-main.content.ts       MAIN-world YouTube caption discovery
-  bilibili.content.ts           isolated-world Bilibili bridge
-  bilibili-main.content.ts      MAIN-world Bilibili metadata discovery
+  background.ts                 特权消息路由与模型调用
+  youtube.content.ts            isolated world 的 YouTube 桥接
+  youtube-main.content.ts       MAIN world 的 YouTube 字幕发现
+  bilibili.content.ts           isolated world 的哔哩哔哩桥接
+  bilibili-main.content.ts      MAIN world 的哔哩哔哩元数据发现
   sidepanel/
-    index.html                  WXT side panel entry
-    main.tsx                    React bootstrap
-    App.tsx                     top-level state rendering
+    index.html                  WXT Side Panel 入口
+    main.tsx                    React 启动文件
+    App.tsx                     顶层状态渲染
 src/
   adapters/
-    shared/page-bridge.ts       validated MAIN-to-isolated-world event transport
-    youtube/adapter.ts          YouTube track and cue adapter
-    youtube/schemas.ts          YouTube response validation
-    bilibili/adapter.ts         Bilibili track and cue adapter
-    bilibili/schemas.ts         Bilibili response validation
+    shared/page-bridge.ts       经校验的 MAIN 到 isolated world 事件传输
+    youtube/adapter.ts          YouTube 字幕轨道与条目适配器
+    youtube/schemas.ts          YouTube 响应校验
+    bilibili/adapter.ts         哔哩哔哩字幕轨道与条目适配器
+    bilibili/schemas.ts         哔哩哔哩响应校验
   components/
-    ModelSettings.tsx           BYOK form and connection test
-    PrepareView.tsx             video, track, and mode selection
-    ProgressView.tsx            progress and cancel UI
-    ResultView.tsx              preview, copy, download, retry UI
+    ModelSettings.tsx           BYOK 表单与连接测试
+    PrepareView.tsx             视频、字幕轨道与模式选择
+    ProgressView.tsx            进度与取消界面
+    ResultView.tsx              预览、复制、下载与重试界面
   core/
-    contracts.ts                domain types and adapter/provider interfaces
-    messages.ts                 runtime-validated extension messages
-    orchestrator.ts             foreground task state machine
-  errors/app-error.ts           stable error codes and redaction
-  markdown/render-markdown.ts   Markdown and timestamp generation
+    contracts.ts                领域类型与适配器/模型接口
+    messages.ts                 运行时校验的扩展消息
+    orchestrator.ts             前台任务状态机
+  errors/app-error.ts           稳定错误码与密钥脱敏
+  markdown/render-markdown.ts   Markdown 与时间戳生成
   model/
-    config-store.ts             local model configuration
-    host-permissions.ts         exact-origin optional permission requests
-    openai-provider.ts          OpenAI-compatible client
-    retry.ts                    retry policy and backoff
+    config-store.ts             本地模型配置
+    host-permissions.ts         精确来源的可选权限请求
+    openai-provider.ts          OpenAI 兼容客户端
+    retry.ts                    重试策略与退避
   processors/
-    normalize.ts                deterministic cue cleanup
-    paragraphs.ts               cue-to-paragraph grouping
-    chunk.ts                    context-budget chunking
-    high-fidelity.ts            Chinese cleanup or English translation
-    refined.ts                  map/reduce refined notes
-    schemas.ts                  model output validation
+    normalize.ts                确定性字幕条目清洗
+    paragraphs.ts               字幕条目到自然段的分组
+    chunk.ts                    基于上下文预算的分块
+    high-fidelity.ts            中文清洗或英文翻译
+    refined.ts                  map/reduce 精炼笔记
+    schemas.ts                  模型输出校验
   prompts/
-    high-fidelity.ts            versioned translation prompt
-    refined.ts                  versioned map/reduce prompts
-  storage/preferences.ts        non-secret UI preferences
+    high-fidelity.ts            带版本的翻译提示词
+    refined.ts                  带版本的 map/reduce 提示词
+  storage/preferences.ts        不含密钥的界面偏好
 tests/
-  fixtures/youtube/             sanitized YouTube fixtures
-  fixtures/bilibili/            sanitized Bilibili fixtures
-  unit/                         pure module tests
-  integration/                  Chrome-message and adapter tests
-  e2e/                          packaged extension smoke tests
+  fixtures/youtube/             脱敏后的 YouTube 样本
+  fixtures/bilibili/            脱敏后的哔哩哔哩样本
+  unit/                         纯模块单元测试
+  integration/                  Chrome 消息与适配器集成测试
+  e2e/                          打包插件冒烟测试
 ```
 
-## Task 1: Extension Shell, Toolchain, and CI
+## 任务 1：插件外壳、工程工具链与 CI
 
-**Files:**
-- Create: `package.json`
-- Create: `pnpm-workspace.yaml`
-- Create: `tsconfig.json`
-- Create: `wxt.config.ts`
-- Create: `vitest.config.ts`
-- Create: `entrypoints/background.ts`
-- Create: `entrypoints/sidepanel/index.html`
-- Create: `entrypoints/sidepanel/main.tsx`
-- Create: `entrypoints/sidepanel/App.tsx`
-- Create: `.github/workflows/ci.yml`
-- Create: `tests/unit/app-shell.test.tsx`
+**涉及文件：**
+- 新建： `package.json`
+- 新建： `pnpm-workspace.yaml`
+- 新建： `tsconfig.json`
+- 新建： `wxt.config.ts`
+- 新建： `vitest.config.ts`
+- 新建： `entrypoints/background.ts`
+- 新建： `entrypoints/sidepanel/index.html`
+- 新建： `entrypoints/sidepanel/main.tsx`
+- 新建： `entrypoints/sidepanel/App.tsx`
+- 新建： `.github/workflows/ci.yml`
+- 新建： `tests/unit/app-shell.test.tsx`
 
-**Interfaces:**
-- Consumes: none.
-- Produces: WXT MV3 build with `sidepanel.html`, `background.ts`, React test environment, and CI commands `lint`, `typecheck`, `test`, `build`.
+**接口关系：**
+- 输入依赖：无。
+- 产出接口：可构建的 WXT MV3 插件、`sidepanel.html`、`background.ts`、React 测试环境，以及 `lint`、`typecheck`、`test`、`build` 四条 CI 命令。
 
-- [ ] **Step 1: Initialize dependencies and write the failing shell test**
+- [ ] **步骤 1：初始化依赖并编写失败的插件外壳测试**
 
-Run:
+执行：
 
 ```bash
 pnpm init
@@ -107,7 +107,7 @@ pnpm add react react-dom zod
 pnpm add -D wxt @wxt-dev/module-react typescript vitest jsdom @testing-library/react @testing-library/jest-dom @types/react @types/react-dom eslint prettier playwright
 ```
 
-Create `tests/unit/app-shell.test.tsx`:
+创建 `tests/unit/app-shell.test.tsx`：
 
 ```tsx
 import { render, screen } from '@testing-library/react'
@@ -123,15 +123,15 @@ describe('side panel shell', () => {
 })
 ```
 
-- [ ] **Step 2: Run the shell test and verify the missing module failure**
+- [ ] **步骤 2：运行外壳测试并确认因模块缺失而失败**
 
-Run: `pnpm vitest run tests/unit/app-shell.test.tsx`
+执行：`pnpm vitest run tests/unit/app-shell.test.tsx`
 
-Expected: FAIL because `entrypoints/sidepanel/App.tsx` does not exist.
+预期：测试失败，原因是 `entrypoints/sidepanel/App.tsx` 尚不存在。
 
-- [ ] **Step 3: Add the minimal WXT and React shell**
+- [ ] **步骤 3：添加最小可用的 WXT 与 React 外壳**
 
-Create `wxt.config.ts`:
+创建 `wxt.config.ts`：
 
 ```ts
 import { defineConfig } from 'wxt'
@@ -152,7 +152,7 @@ export default defineConfig({
 })
 ```
 
-Create `entrypoints/sidepanel/App.tsx`:
+创建 `entrypoints/sidepanel/App.tsx`：
 
 ```tsx
 export function App() {
@@ -165,7 +165,7 @@ export function App() {
 }
 ```
 
-Create `entrypoints/sidepanel/main.tsx`:
+创建 `entrypoints/sidepanel/main.tsx`：
 
 ```tsx
 import { StrictMode } from 'react'
@@ -179,7 +179,7 @@ createRoot(document.getElementById('root')!).render(
 )
 ```
 
-Create `entrypoints/background.ts`:
+创建 `entrypoints/background.ts`：
 
 ```ts
 export default defineBackground(() => {
@@ -187,9 +187,9 @@ export default defineBackground(() => {
 })
 ```
 
-Configure Vitest with `environment: 'jsdom'`, `globals: true`, and `@testing-library/jest-dom/vitest`. Configure TypeScript with `strict: true`, `noUncheckedIndexedAccess: true`, and `.wxt/tsconfig.json` as the base. Add scripts for `dev`, `build`, `zip`, `lint`, `typecheck`, and `test`.
+将 Vitest 配置为 `environment: 'jsdom'`、`globals: true`，并加载 `@testing-library/jest-dom/vitest`。TypeScript 开启 `strict: true` 和 `noUncheckedIndexedAccess: true`，继承 `.wxt/tsconfig.json`。添加 `dev`、`build`、`zip`、`lint`、`typecheck` 和 `test` 脚本。
 
-Create `vitest.config.ts`:
+创建 `vitest.config.ts`：
 
 ```ts
 import { defineConfig } from 'vitest/config'
@@ -203,7 +203,7 @@ export default defineConfig({
 })
 ```
 
-Create `tsconfig.json`:
+创建 `tsconfig.json`：
 
 ```json
 {
@@ -215,7 +215,7 @@ Create `tsconfig.json`:
 }
 ```
 
-Set these exact package scripts:
+设置以下准确的包脚本：
 
 ```json
 {
@@ -231,9 +231,9 @@ Set these exact package scripts:
 }
 ```
 
-- [ ] **Step 4: Verify shell, types, and production build**
+- [ ] **步骤 4：验证插件外壳、类型检查和生产构建**
 
-Run:
+执行：
 
 ```bash
 pnpm test -- tests/unit/app-shell.test.tsx
@@ -241,31 +241,31 @@ pnpm typecheck
 pnpm build
 ```
 
-Expected: test PASS, typecheck exits 0, and `.output/chrome-mv3/manifest.json` declares Chrome 114, Side Panel, storage, downloads, and only the two video-site host permissions.
+预期：测试通过，类型检查退出码为 0；`.output/chrome-mv3/manifest.json` 声明最低 Chrome 114、Side Panel、storage、downloads，并且只包含两个视频网站的主机权限。
 
-- [ ] **Step 5: Add CI and commit**
+- [ ] **步骤 5：添加 CI 并提交**
 
-Create `.github/workflows/ci.yml` to run `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` on pull requests and pushes to `main`.
+创建 `.github/workflows/ci.yml`，在 Pull Request 和推送到 `main` 时依次执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm typecheck`、`pnpm test` 和 `pnpm build`。
 
 ```bash
 git add package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json wxt.config.ts vitest.config.ts entrypoints tests/unit/app-shell.test.tsx .github/workflows/ci.yml
 git commit -m "chore: scaffold WXT extension shell"
 ```
 
-## Task 2: Domain Contracts, Errors, and Message Validation
+## 任务 2：领域契约、错误模型与消息校验
 
-**Files:**
-- Create: `src/core/contracts.ts`
-- Create: `src/core/messages.ts`
-- Create: `src/errors/app-error.ts`
-- Create: `tests/unit/contracts.test.ts`
-- Create: `tests/unit/app-error.test.ts`
+**涉及文件：**
+- 新建： `src/core/contracts.ts`
+- 新建： `src/core/messages.ts`
+- 新建： `src/errors/app-error.ts`
+- 新建： `tests/unit/contracts.test.ts`
+- 新建： `tests/unit/app-error.test.ts`
 
-**Interfaces:**
-- Consumes: Zod from Task 1.
-- Produces: `VideoMetadata`, `SubtitleTrack`, `SubtitleCue`, `VideoDocument`, `SubtitleAdapter`, `ModelProvider`, `AppError`, `parseExtensionMessage`.
+**接口关系：**
+- 输入依赖：任务 1 引入的 Zod。
+- 产出接口：`VideoMetadata`、`SubtitleTrack`、`SubtitleCue`、`VideoDocument`、`SubtitleAdapter`、`ModelProvider`、`AppError`、`parseExtensionMessage`。
 
-- [ ] **Step 1: Write failing contract and redaction tests**
+- [ ] **步骤 1：编写失败的契约与密钥脱敏测试**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -288,15 +288,15 @@ describe('runtime boundaries', () => {
 })
 ```
 
-- [ ] **Step 2: Run tests and verify missing exports**
+- [ ] **步骤 2：运行测试并确认因导出缺失而失败**
 
-Run: `pnpm vitest run tests/unit/contracts.test.ts tests/unit/app-error.test.ts`
+执行：`pnpm vitest run tests/unit/contracts.test.ts tests/unit/app-error.test.ts`
 
-Expected: FAIL because the domain modules do not exist.
+预期：测试失败，原因是领域模块尚不存在。
 
-- [ ] **Step 3: Implement exact domain and message contracts**
+- [ ] **步骤 3：实现准确的领域与消息契约**
 
-Define the domain types exactly as approved in the design. Add:
+严格按照已确认的设计定义领域类型，并添加：
 
 ```ts
 export type ModelMessage = {
@@ -326,7 +326,7 @@ export interface ModelProvider {
 }
 ```
 
-Define a Zod discriminated union for only these messages:
+使用 Zod 可辨识联合类型，只允许以下消息：
 
 ```ts
 const ExtensionMessageSchema = z.discriminatedUnion('type', [
@@ -346,36 +346,36 @@ export function parseExtensionMessage(input: unknown) {
 }
 ```
 
-Implement the ten approved error codes, `AppError`, `redactSecrets`, and a `toJSON` method that returns only `code` and redacted `message`.
+实现规格中确认的 10 个错误码、`AppError`、`redactSecrets`，以及仅返回 `code` 和脱敏后 `message` 的 `toJSON` 方法。
 
-- [ ] **Step 4: Run focused and full tests**
+- [ ] **步骤 4：运行专项测试与完整类型检查**
 
-Run: `pnpm vitest run tests/unit/contracts.test.ts tests/unit/app-error.test.ts && pnpm typecheck`
+执行：`pnpm vitest run tests/unit/contracts.test.ts tests/unit/app-error.test.ts && pnpm typecheck`
 
-Expected: all tests PASS and TypeScript exits 0.
+预期：全部测试通过，TypeScript 退出码为 0。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/core/contracts.ts src/core/messages.ts src/errors/app-error.ts tests/unit/contracts.test.ts tests/unit/app-error.test.ts
 git commit -m "feat: define validated extension contracts"
 ```
 
-## Task 3: Model Configuration, Storage, and Exact-Origin Permission
+## 任务 3：模型配置、本地存储与精确来源授权
 
-**Files:**
-- Create: `src/model/config-store.ts`
-- Create: `src/model/host-permissions.ts`
-- Create: `src/components/ModelSettings.tsx`
-- Create: `tests/unit/config-store.test.ts`
-- Create: `tests/unit/host-permissions.test.ts`
-- Create: `tests/unit/model-settings.test.tsx`
+**涉及文件：**
+- 新建： `src/model/config-store.ts`
+- 新建： `src/model/host-permissions.ts`
+- 新建： `src/components/ModelSettings.tsx`
+- 新建： `tests/unit/config-store.test.ts`
+- 新建： `tests/unit/host-permissions.test.ts`
+- 新建： `tests/unit/model-settings.test.tsx`
 
-**Interfaces:**
-- Consumes: `AppError` from Task 2.
-- Produces: `ModelConfig`, `ModelConfigStore`, `normalizeBaseUrl`, `requestModelOrigin`, `ModelSettings`.
+**接口关系：**
+- 输入依赖：任务 2 的 `AppError`。
+- 产出接口：`ModelConfig`、`ModelConfigStore`、`normalizeBaseUrl`、`requestModelOrigin`、`ModelSettings`。
 
-- [ ] **Step 1: Write failing validation and permission tests**
+- [ ] **步骤 1：编写失败的配置校验与权限测试**
 
 ```ts
 import { describe, expect, it, vi } from 'vitest'
@@ -399,13 +399,13 @@ describe('model configuration', () => {
 })
 ```
 
-- [ ] **Step 2: Verify the focused tests fail**
+- [ ] **步骤 2：确认专项测试按预期失败**
 
-Run: `pnpm vitest run tests/unit/config-store.test.ts tests/unit/host-permissions.test.ts`
+执行：`pnpm vitest run tests/unit/config-store.test.ts tests/unit/host-permissions.test.ts`
 
-Expected: FAIL because the modules do not exist.
+预期：测试失败，原因是相关模块尚不存在。
 
-- [ ] **Step 3: Implement storage and permissions**
+- [ ] **步骤 3：实现配置存储与来源授权**
 
 ```ts
 export type ModelConfig = {
@@ -425,39 +425,39 @@ export function normalizeBaseUrl(input: string, allowLocalhost = import.meta.env
 }
 ```
 
-Implement `ModelConfigStore` with `get`, `set`, and `clear` over the single key `modelConfig`. Reject empty API Key/model and a context window below 4096. Implement `requestModelOrigin` by converting Base URL to `${origin}/*` and calling `chrome.permissions.request` through an injectable function. `ModelSettings` must mask the key, never render the stored value as ordinary text, and expose save, test, and delete callbacks.
+使用单一存储键 `modelConfig` 实现 `ModelConfigStore` 的 `get`、`set` 和 `clear`。拒绝空 API Key、空模型名称及小于 4096 的上下文窗口。`requestModelOrigin` 将 Base URL 转换为 `${origin}/*`，并通过可注入函数调用 `chrome.permissions.request`。`ModelSettings` 必须遮挡密钥，不得把已存储值作为普通文本渲染，并提供保存、测试和删除回调。
 
-- [ ] **Step 4: Verify storage, permission, and component behavior**
+- [ ] **步骤 4：验证存储、来源授权和组件行为**
 
-Run:
+执行：
 
 ```bash
 pnpm vitest run tests/unit/config-store.test.ts tests/unit/host-permissions.test.ts tests/unit/model-settings.test.tsx
 pnpm typecheck
 ```
 
-Expected: validation, exact-origin request, masked key, save, test, and delete tests PASS.
+预期：配置校验、精确来源授权、密钥遮挡、保存、连接测试和删除用例全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/model/config-store.ts src/model/host-permissions.ts src/components/ModelSettings.tsx tests/unit/config-store.test.ts tests/unit/host-permissions.test.ts tests/unit/model-settings.test.tsx
 git commit -m "feat: add secure BYOK model settings"
 ```
 
-## Task 4: OpenAI-Compatible Provider and Retry Policy
+## 任务 4：OpenAI 兼容客户端与重试策略
 
-**Files:**
-- Create: `src/model/openai-provider.ts`
-- Create: `src/model/retry.ts`
-- Create: `tests/unit/openai-provider.test.ts`
-- Create: `tests/unit/retry.test.ts`
+**涉及文件：**
+- 新建： `src/model/openai-provider.ts`
+- 新建： `src/model/retry.ts`
+- 新建： `tests/unit/openai-provider.test.ts`
+- 新建： `tests/unit/retry.test.ts`
 
-**Interfaces:**
-- Consumes: `ModelProvider`, `ModelConfig`, `AppError`.
-- Produces: `OpenAICompatibleProvider`, `withRetry`, `RetryPolicy`.
+**接口关系：**
+- 输入依赖：`ModelProvider`、`ModelConfig`、`AppError`。
+- 产出接口：`OpenAICompatibleProvider`、`withRetry`、`RetryPolicy`。
 
-- [ ] **Step 1: Write failing provider tests using an injected fetch**
+- [ ] **步骤 1：使用可注入 fetch 编写失败的模型客户端测试**
 
 ```ts
 it('posts chat completions without exposing the key in errors', async () => {
@@ -477,15 +477,15 @@ it.each([[401, 'MODEL_AUTH_FAILED'], [429, 'MODEL_RATE_LIMITED'], [413, 'MODEL_C
 )
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **步骤 2：运行并确认测试失败**
 
-Run: `pnpm vitest run tests/unit/openai-provider.test.ts tests/unit/retry.test.ts`
+执行：`pnpm vitest run tests/unit/openai-provider.test.ts tests/unit/retry.test.ts`
 
-Expected: FAIL because provider and retry modules are missing.
+预期：测试失败，原因是模型客户端和重试模块尚不存在。
 
-- [ ] **Step 3: Implement the provider and bounded retry**
+- [ ] **步骤 3：实现模型客户端和有上限的重试策略**
 
-The provider must POST to `${baseUrl}/chat/completions`, set `Authorization: Bearer ${apiKey}`, send `{ model, messages, temperature: 0 }`, validate `choices[0].message.content`, and never include request headers/body in thrown errors.
+模型客户端必须向 `${baseUrl}/chat/completions` 发起 POST 请求，设置 `Authorization: Bearer ${apiKey}`，发送 `{ model, messages, temperature: 0 }`，校验 `choices[0].message.content`，并确保抛出的错误不包含请求头或请求体。
 
 ```ts
 export type RetryPolicy = {
@@ -512,36 +512,36 @@ export async function withRetry<T>(
 }
 ```
 
-Use at most three attempts. Parse `Retry-After` when present and cap the delay. Abort immediately when `AbortSignal` is aborted.
+最多尝试 3 次；服务端提供 `Retry-After` 时应解析并限制最大等待时间；`AbortSignal` 取消后立即终止。
 
-- [ ] **Step 4: Verify provider, retry, and redaction**
+- [ ] **步骤 4：验证模型调用、重试与密钥脱敏**
 
-Run: `pnpm vitest run tests/unit/openai-provider.test.ts tests/unit/retry.test.ts tests/unit/app-error.test.ts && pnpm typecheck`
+执行：`pnpm vitest run tests/unit/openai-provider.test.ts tests/unit/retry.test.ts tests/unit/app-error.test.ts && pnpm typecheck`
 
-Expected: success, status mapping, abort, retry cap, and secret-redaction cases PASS.
+预期：成功响应、状态码映射、取消、重试上限和密钥脱敏用例全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/model/openai-provider.ts src/model/retry.ts tests/unit/openai-provider.test.ts tests/unit/retry.test.ts
 git commit -m "feat: add OpenAI compatible model provider"
 ```
 
-## Task 5: Deterministic Subtitle Normalization, Paragraphs, and Chunking
+## 任务 5：确定性字幕标准化、自然段恢复与分块
 
-**Files:**
-- Create: `src/processors/normalize.ts`
-- Create: `src/processors/paragraphs.ts`
-- Create: `src/processors/chunk.ts`
-- Create: `tests/unit/normalize.test.ts`
-- Create: `tests/unit/paragraphs.test.ts`
-- Create: `tests/unit/chunk.test.ts`
+**涉及文件：**
+- 新建： `src/processors/normalize.ts`
+- 新建： `src/processors/paragraphs.ts`
+- 新建： `src/processors/chunk.ts`
+- 新建： `tests/unit/normalize.test.ts`
+- 新建： `tests/unit/paragraphs.test.ts`
+- 新建： `tests/unit/chunk.test.ts`
 
-**Interfaces:**
-- Consumes: `SubtitleCue`.
-- Produces: `normalizeCues(cues)`, `buildParagraphs(cues, options)`, `chunkParagraphs(paragraphs, budget)`.
+**接口关系：**
+- 输入依赖：`SubtitleCue`。
+- 产出接口：`normalizeCues(cues)`、`buildParagraphs(cues, options)`、`chunkParagraphs(paragraphs, budget)`。
 
-- [ ] **Step 1: Write failing behavior tests**
+- [ ] **步骤 1：编写失败的字幕处理行为测试**
 
 ```ts
 it('removes rolling-caption overlap without losing new words', () => {
@@ -561,15 +561,15 @@ it('never splits a paragraph across chunks', () => {
 })
 ```
 
-- [ ] **Step 2: Verify tests fail before implementation**
+- [ ] **步骤 2：确认测试在实现前失败**
 
-Run: `pnpm vitest run tests/unit/normalize.test.ts tests/unit/paragraphs.test.ts tests/unit/chunk.test.ts`
+执行：`pnpm vitest run tests/unit/normalize.test.ts tests/unit/paragraphs.test.ts tests/unit/chunk.test.ts`
 
-Expected: FAIL because processor functions are missing.
+预期：测试失败，原因是字幕处理函数尚不存在。
 
-- [ ] **Step 3: Implement pure processors**
+- [ ] **步骤 3：实现无副作用的纯处理函数**
 
-`normalizeCues` must decode entities, collapse whitespace, drop empty/exact duplicates, compute the longest suffix/prefix word overlap, and preserve timing/IDs. `buildParagraphs` must merge adjacent cues until punctuation, a gap above 1500 ms, or 600 Chinese characters. Each paragraph has a stable ID derived from its first/last cue IDs and retains `startMs`, `endMs`, and `cueIds`.
+`normalizeCues` 必须解码实体、合并多余空白、移除空字幕和完全重复字幕、计算最长的后缀/前缀词语重叠，并保留时间和 ID。`buildParagraphs` 持续合并相邻字幕，直到出现结束标点、间隔超过 1500 毫秒，或达到 600 个中文字符。每个自然段使用首尾字幕 ID 生成稳定 ID，并保留 `startMs`、`endMs` 和 `cueIds`。
 
 ```ts
 export type SubtitleParagraph = {
@@ -587,37 +587,37 @@ export type ParagraphChunk = {
 }
 ```
 
-`chunkParagraphs` must reject a single paragraph larger than the budget with `MODEL_CONTEXT_EXCEEDED`, preserve order, and only add overlap for refined mode.
+`chunkParagraphs` 必须在单个自然段超过预算时抛出 `MODEL_CONTEXT_EXCEEDED`，保持原始顺序，并且只在 AI 精炼模式中增加重叠段落。
 
-- [ ] **Step 4: Run focused tests and property invariants**
+- [ ] **步骤 4：运行专项测试并验证处理不变量**
 
-Run: `pnpm vitest run tests/unit/normalize.test.ts tests/unit/paragraphs.test.ts tests/unit/chunk.test.ts && pnpm typecheck`
+执行：`pnpm vitest run tests/unit/normalize.test.ts tests/unit/paragraphs.test.ts tests/unit/chunk.test.ts && pnpm typecheck`
 
-Expected: tests prove ordered cue coverage, stable IDs, no empty cues, no hard paragraph splits, and bounded chunk sizes.
+预期：测试证明字幕按序完整覆盖、ID 稳定、不产生空字幕、不硬切自然段，并且分块大小不超过预算。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/processors/normalize.ts src/processors/paragraphs.ts src/processors/chunk.ts tests/unit/normalize.test.ts tests/unit/paragraphs.test.ts tests/unit/chunk.test.ts
 git commit -m "feat: add deterministic subtitle pipeline"
 ```
 
-## Task 6: High-Fidelity and AI-Refined Processors
+## 任务 6：高保真与 AI 精炼处理器
 
-**Files:**
-- Create: `src/processors/schemas.ts`
-- Create: `src/processors/high-fidelity.ts`
-- Create: `src/processors/refined.ts`
-- Create: `src/prompts/high-fidelity.ts`
-- Create: `src/prompts/refined.ts`
-- Create: `tests/unit/high-fidelity.test.ts`
-- Create: `tests/unit/refined.test.ts`
+**涉及文件：**
+- 新建： `src/processors/schemas.ts`
+- 新建： `src/processors/high-fidelity.ts`
+- 新建： `src/processors/refined.ts`
+- 新建： `src/prompts/high-fidelity.ts`
+- 新建： `src/prompts/refined.ts`
+- 新建： `tests/unit/high-fidelity.test.ts`
+- 新建： `tests/unit/refined.test.ts`
 
-**Interfaces:**
-- Consumes: `ModelProvider`, `SubtitleParagraph`, `ParagraphChunk`, `AppError`.
-- Produces: `processHighFidelity`, `processRefined`, `TranslatedParagraph`, `RefinedDocument`.
+**接口关系：**
+- 输入依赖：`ModelProvider`、`SubtitleParagraph`、`ParagraphChunk`、`AppError`。
+- 产出接口：`processHighFidelity`、`processRefined`、`TranslatedParagraph`、`RefinedDocument`。
 
-- [ ] **Step 1: Write failing coverage and hallucination-boundary tests**
+- [ ] **步骤 1：编写失败的段落覆盖与幻觉边界测试**
 
 ```ts
 it('returns Chinese paragraphs unchanged without calling the model', async () => {
@@ -640,17 +640,17 @@ it('omits an empty facts section instead of inventing content', async () => {
 })
 ```
 
-- [ ] **Step 2: Run and verify processor tests fail**
+- [ ] **步骤 2：运行并确认处理器测试失败**
 
-Run: `pnpm vitest run tests/unit/high-fidelity.test.ts tests/unit/refined.test.ts`
+执行：`pnpm vitest run tests/unit/high-fidelity.test.ts tests/unit/refined.test.ts`
 
-Expected: FAIL because processor modules do not exist.
+预期：测试失败，原因是处理器模块尚不存在。
 
-- [ ] **Step 3: Implement versioned prompts and validated outputs**
+- [ ] **步骤 3：实现带版本的提示词与输出校验**
 
-Use Zod schemas that require exact paragraph IDs for high-fidelity translation. Compare input/output ID sets and reject missing, duplicate, or unknown IDs. The Chinese path returns deterministic paragraphs directly.
+高保真翻译使用 Zod Schema 强制要求准确的自然段 ID；比较输入与输出 ID 集合，拒绝缺失、重复或未知 ID。中文字幕路径直接返回确定性清洗后的自然段。
 
-For refined mode, define map output fields `chapterCandidates`, `claims`, `facts`, `people`, `examples`, and `conclusions`, each with source paragraph IDs. The reduce output fields are `overview`, `coreIdeas`, `chapters`, `importantFacts`, and `conclusion`. Every timestamp reference must be derived from a valid source paragraph ID.
+AI 精炼模式的 map 阶段输出 `chapterCandidates`、`claims`、`facts`、`people`、`examples` 和 `conclusions`，每项都携带来源自然段 ID；reduce 阶段输出 `overview`、`coreIdeas`、`chapters`、`importantFacts` 和 `conclusion`。每个时间戳引用都必须来自有效的来源自然段 ID。
 
 ```ts
 export type TranslatedParagraph = {
@@ -692,40 +692,40 @@ export async function processHighFidelity(
 }
 ```
 
-Keep prompts in exported versioned constants such as `HIGH_FIDELITY_PROMPT_V1`; require JSON-only responses and explicitly forbid summarization or unsupported facts.
+提示词以 `HIGH_FIDELITY_PROMPT_V1` 这类带版本的常量导出；要求模型只返回 JSON，并明确禁止在高保真模式中总结或补充无字幕依据的事实。
 
-- [ ] **Step 4: Verify both processing modes**
+- [ ] **步骤 4：验证两种处理模式**
 
-Run: `pnpm vitest run tests/unit/high-fidelity.test.ts tests/unit/refined.test.ts && pnpm typecheck`
+执行：`pnpm vitest run tests/unit/high-fidelity.test.ts tests/unit/refined.test.ts && pnpm typecheck`
 
-Expected: Chinese bypass, English ID coverage, map/reduce provenance, abort, partial failure, and empty-section behavior PASS.
+预期：中文字幕直通、英文 ID 覆盖、map/reduce 来源追溯、取消、部分失败及空章节省略用例全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/processors src/prompts tests/unit/high-fidelity.test.ts tests/unit/refined.test.ts
 git commit -m "feat: add high fidelity and refined processors"
 ```
 
-## Task 7: YouTube Adapter with Sanitized Fixtures
+## 任务 7：YouTube 字幕适配器与脱敏样本
 
-**Files:**
-- Create: `entrypoints/youtube-main.content.ts`
-- Create: `entrypoints/youtube.content.ts`
-- Create: `src/adapters/shared/page-bridge.ts`
-- Create: `src/adapters/youtube/schemas.ts`
-- Create: `src/adapters/youtube/adapter.ts`
-- Create: `tests/fixtures/youtube/player-response.json`
-- Create: `tests/fixtures/youtube/captions.json3`
-- Create: `tests/integration/youtube-adapter.test.ts`
+**涉及文件：**
+- 新建： `entrypoints/youtube-main.content.ts`
+- 新建： `entrypoints/youtube.content.ts`
+- 新建： `src/adapters/shared/page-bridge.ts`
+- 新建： `src/adapters/youtube/schemas.ts`
+- 新建： `src/adapters/youtube/adapter.ts`
+- 新建： `tests/fixtures/youtube/player-response.json`
+- 新建： `tests/fixtures/youtube/captions.json3`
+- 新建： `tests/integration/youtube-adapter.test.ts`
 
-**Interfaces:**
-- Consumes: `SubtitleAdapter`, domain types, validated messages.
-- Produces: `YouTubeAdapter`, `extractYouTubeBridgePayload(input: unknown): YouTubeBridgePayload`, sanitized page bridge payload `{ videoId, metadata, tracks }`.
+**接口关系：**
+- 输入依赖：`SubtitleAdapter`、领域类型和已校验消息。
+- 产出接口：`YouTubeAdapter`、`extractYouTubeBridgePayload(input: unknown): YouTubeBridgePayload`，以及脱敏后的页面桥接数据 `{ videoId, metadata, tracks }`。
 
-- [ ] **Step 1: Add fixtures and write failing adapter tests**
+- [ ] **步骤 1：添加脱敏样本并编写失败的适配器测试**
 
-Use hand-minimized fixtures containing one public synthetic video ID, two tracks, and three caption events. Do not copy cookies, authorization headers, visitor data, or unrelated player response fields.
+手工构造最小样本，只包含一个公开的虚拟视频 ID、两个字幕轨道和三条字幕事件。不得复制 Cookie、授权请求头、访客数据或无关的播放器响应字段。
 
 ```ts
 it('maps caption tracks and JSON3 events to domain objects', async () => {
@@ -740,15 +740,15 @@ it('maps caption tracks and JSON3 events to domain objects', async () => {
 })
 ```
 
-- [ ] **Step 2: Verify adapter tests fail**
+- [ ] **步骤 2：确认适配器测试失败**
 
-Run: `pnpm vitest run tests/integration/youtube-adapter.test.ts`
+执行：`pnpm vitest run tests/integration/youtube-adapter.test.ts`
 
-Expected: FAIL because `YouTubeAdapter` does not exist.
+预期：测试失败，原因是 `YouTubeAdapter` 尚不存在。
 
-- [ ] **Step 3: Implement the validated YouTube bridge and adapter**
+- [ ] **步骤 3：实现经过校验的 YouTube 页面桥接与适配器**
 
-The MAIN-world entry reads only `ytInitialPlayerResponse.videoDetails` and `captions.playerCaptionsTracklistRenderer.captionTracks`, reduces them to the bridge schema, and dispatches a namespaced `CustomEvent`. The isolated-world entry validates the event detail before answering extension messages.
+MAIN world 入口仅读取 `ytInitialPlayerResponse.videoDetails` 和 `captions.playerCaptionsTracklistRenderer.captionTracks`，裁剪为桥接 Schema 后，通过带命名空间的 `CustomEvent` 发送。isolated world 入口必须先校验事件数据，再响应扩展消息。
 
 ```ts
 export default defineContentScript({
@@ -764,38 +764,38 @@ export default defineContentScript({
 })
 ```
 
-Validate that caption `baseUrl` uses HTTPS and an expected YouTube/Google video host before fetching. Append `fmt=json3`, parse only event timing and segment text, and map extraction failures to `SUBTITLE_EXTRACTION_FAILED`. The page cannot supply arbitrary fetch headers or methods.
+请求前校验字幕 `baseUrl` 使用 HTTPS，并且属于预期的 YouTube/Google 视频域名。追加 `fmt=json3`，只解析事件时间与分段文本，将提取失败映射为 `SUBTITLE_EXTRACTION_FAILED`。页面不得提供任意请求头或请求方法。
 
-- [ ] **Step 4: Verify fixtures, security checks, and build**
+- [ ] **步骤 4：验证样本、安全检查与构建**
 
-Run: `pnpm vitest run tests/integration/youtube-adapter.test.ts && pnpm build`
+执行：`pnpm vitest run tests/integration/youtube-adapter.test.ts && pnpm build`
 
-Expected: fixture mapping PASS, malicious caption URL rejection PASS, and WXT emits both YouTube content scripts.
+预期：样本映射和恶意字幕 URL 拒绝测试通过，WXT 构建产物包含两个 YouTube Content Script。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add entrypoints/youtube-main.content.ts entrypoints/youtube.content.ts src/adapters/shared/page-bridge.ts src/adapters/youtube tests/fixtures/youtube tests/integration/youtube-adapter.test.ts
 git commit -m "feat: extract existing YouTube captions"
 ```
 
-## Task 8: Bilibili Adapter with Sanitized Fixtures
+## 任务 8：哔哩哔哩字幕适配器与脱敏样本
 
-**Files:**
-- Create: `entrypoints/bilibili-main.content.ts`
-- Create: `entrypoints/bilibili.content.ts`
-- Create: `src/adapters/bilibili/schemas.ts`
-- Create: `src/adapters/bilibili/adapter.ts`
-- Create: `tests/fixtures/bilibili/player-context.json`
-- Create: `tests/fixtures/bilibili/player-subtitles.json`
-- Create: `tests/fixtures/bilibili/subtitle-body.json`
-- Create: `tests/integration/bilibili-adapter.test.ts`
+**涉及文件：**
+- 新建： `entrypoints/bilibili-main.content.ts`
+- 新建： `entrypoints/bilibili.content.ts`
+- 新建： `src/adapters/bilibili/schemas.ts`
+- 新建： `src/adapters/bilibili/adapter.ts`
+- 新建： `tests/fixtures/bilibili/player-context.json`
+- 新建： `tests/fixtures/bilibili/player-subtitles.json`
+- 新建： `tests/fixtures/bilibili/subtitle-body.json`
+- 新建： `tests/integration/bilibili-adapter.test.ts`
 
-**Interfaces:**
-- Consumes: shared page bridge and domain contracts.
-- Produces: `BilibiliAdapter`, `extractBilibiliBridgePayload(input: unknown): BilibiliBridgePayload`, sanitized bridge payload `{ bvid, aid, cid, title, author }`.
+**接口关系：**
+- 输入依赖：共享页面桥接与领域契约。
+- 产出接口：`BilibiliAdapter`、`extractBilibiliBridgePayload(input: unknown): BilibiliBridgePayload`，以及脱敏后的桥接数据 `{ bvid, aid, cid, title, author }`。
 
-- [ ] **Step 1: Add minimized fixtures and failing mapping tests**
+- [ ] **步骤 1：添加最小化样本并编写失败的映射测试**
 
 ```ts
 it('maps Bilibili subtitle seconds to milliseconds', async () => {
@@ -808,15 +808,15 @@ it('maps Bilibili subtitle seconds to milliseconds', async () => {
 })
 ```
 
-- [ ] **Step 2: Verify adapter test failure**
+- [ ] **步骤 2：确认适配器测试失败**
 
-Run: `pnpm vitest run tests/integration/bilibili-adapter.test.ts`
+执行：`pnpm vitest run tests/integration/bilibili-adapter.test.ts`
 
-Expected: FAIL because `BilibiliAdapter` does not exist.
+预期：测试失败，原因是 `BilibiliAdapter` 尚不存在。
 
-- [ ] **Step 3: Implement Bilibili metadata, track, and cue mapping**
+- [ ] **步骤 3：实现哔哩哔哩元数据、字幕轨道和字幕条目映射**
 
-The MAIN-world entry reads only the current page identifiers and public metadata from Bilibili page state. The isolated adapter requests the current video's player subtitle metadata using the current `bvid/cid`, validates the response, and fetches only subtitle URLs returned for that same video.
+MAIN world 入口仅读取哔哩哔哩页面状态中的当前视频标识与公开元数据。isolated world 适配器使用当前 `bvid/cid` 请求该视频的播放器字幕元数据，校验响应后，只获取同一视频返回的字幕 URL。
 
 ```ts
 const BilibiliCueSchema = z.object({
@@ -835,34 +835,34 @@ function mapCue(cue: z.infer<typeof BilibiliCueSchema>, index: number): Subtitle
 }
 ```
 
-Require HTTPS, allow only Bilibili-owned subtitle hosts returned by the validated response, send credentials only to the same Bilibili origin, and map missing subtitle arrays to `NO_SUBTITLE`.
+强制使用 HTTPS；只允许经过校验的响应中返回的哔哩哔哩字幕域名；凭证仅发送到同源哔哩哔哩地址；字幕数组缺失时映射为 `NO_SUBTITLE`。
 
-- [ ] **Step 4: Verify fixtures and build**
+- [ ] **步骤 4：验证样本与构建**
 
-Run: `pnpm vitest run tests/integration/bilibili-adapter.test.ts && pnpm build`
+执行：`pnpm vitest run tests/integration/bilibili-adapter.test.ts && pnpm build`
 
-Expected: track/cue mapping, seconds conversion, missing subtitles, malformed responses, and hostile URL rejection PASS.
+预期：字幕轨道与条目映射、秒到毫秒转换、无字幕、异常响应和恶意 URL 拒绝用例全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add entrypoints/bilibili-main.content.ts entrypoints/bilibili.content.ts src/adapters/bilibili tests/fixtures/bilibili tests/integration/bilibili-adapter.test.ts
 git commit -m "feat: extract existing Bilibili captions"
 ```
 
-## Task 9: Service Worker Routing and Foreground Task Orchestrator
+## 任务 9：Service Worker 路由与前台任务编排器
 
-**Files:**
-- Modify: `entrypoints/background.ts`
-- Create: `src/core/orchestrator.ts`
-- Create: `tests/integration/background-routing.test.ts`
-- Create: `tests/unit/orchestrator.test.ts`
+**涉及文件：**
+- 修改： `entrypoints/background.ts`
+- 新建： `src/core/orchestrator.ts`
+- 新建： `tests/integration/background-routing.test.ts`
+- 新建： `tests/unit/orchestrator.test.ts`
 
-**Interfaces:**
-- Consumes: validated messages, config store, provider, retry, adapters, processors.
-- Produces: `createBackgroundRouter`, `TaskOrchestrator`, `TaskState`, `TaskEvent`.
+**接口关系：**
+- 输入依赖：已校验消息、配置存储、模型客户端、重试策略、平台适配器和内容处理器。
+- 产出接口：`createBackgroundRouter`、`TaskOrchestrator`、`TaskState`、`TaskEvent`。
 
-- [ ] **Step 1: Write failing routing and state-machine tests**
+- [ ] **步骤 1：编写失败的路由与状态机测试**
 
 ```ts
 it('never returns model configuration to a content-script sender', async () => {
@@ -881,13 +881,13 @@ it('preserves successful chunks when one chunk fails', async () => {
 })
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [ ] **步骤 2：运行并确认测试失败**
 
-Run: `pnpm vitest run tests/integration/background-routing.test.ts tests/unit/orchestrator.test.ts`
+执行：`pnpm vitest run tests/integration/background-routing.test.ts tests/unit/orchestrator.test.ts`
 
-Expected: FAIL because router and orchestrator are absent.
+预期：测试失败，原因是路由器和编排器尚不存在。
 
-- [ ] **Step 3: Implement explicit routing and task states**
+- [ ] **步骤 3：实现显式消息路由与任务状态**
 
 ```ts
 export type ProcessedChunk = {
@@ -920,38 +920,38 @@ export type TaskState =
   | { status: 'cancelled'; completedChunks: ProcessedChunk[] }
 ```
 
-The background router must parse every message, inspect `sender.url`, allow model messages only from extension pages, create an `AbortController` per request UUID, and expose only sanitized errors. The orchestrator must fetch context/cues, normalize, paragraphize, process, render, and emit immutable state changes. `cancel()` aborts active requests. `retryFailed()` reuses successful chunks and schedules only failed IDs.
+后台路由器必须解析每条消息、检查 `sender.url`、只允许扩展页面发起模型请求、为每个请求 UUID 创建 `AbortController`，并且只暴露脱敏错误。编排器依次读取视频上下文和字幕、标准化、恢复自然段、处理、渲染，并发出不可变状态更新。`cancel()` 中止活动请求；`retryFailed()` 复用成功分块，只调度失败 ID。
 
-- [ ] **Step 4: Verify routing, cancellation, and partial recovery**
+- [ ] **步骤 4：验证消息路由、任务取消与部分结果恢复**
 
-Run: `pnpm vitest run tests/integration/background-routing.test.ts tests/unit/orchestrator.test.ts && pnpm typecheck`
+执行：`pnpm vitest run tests/integration/background-routing.test.ts tests/unit/orchestrator.test.ts && pnpm typecheck`
 
-Expected: sender validation, cancellation, page-switch prompt event, partial result preservation, and single-chunk retry PASS.
+预期：发送者校验、任务取消、页面切换提示事件、部分结果保留和单分块重试用例全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add entrypoints/background.ts src/core/orchestrator.ts tests/integration/background-routing.test.ts tests/unit/orchestrator.test.ts
 git commit -m "feat: orchestrate foreground conversion tasks"
 ```
 
-## Task 10: Markdown Renderer, Side Panel States, Copy, and Download
+## 任务 10：Markdown 渲染、Side Panel 状态、复制与下载
 
-**Files:**
-- Create: `src/markdown/render-markdown.ts`
-- Create: `src/storage/preferences.ts`
-- Create: `src/components/PrepareView.tsx`
-- Create: `src/components/ProgressView.tsx`
-- Create: `src/components/ResultView.tsx`
-- Modify: `entrypoints/sidepanel/App.tsx`
-- Create: `tests/unit/render-markdown.test.ts`
-- Create: `tests/unit/sidepanel-flow.test.tsx`
+**涉及文件：**
+- 新建： `src/markdown/render-markdown.ts`
+- 新建： `src/storage/preferences.ts`
+- 新建： `src/components/PrepareView.tsx`
+- 新建： `src/components/ProgressView.tsx`
+- 新建： `src/components/ResultView.tsx`
+- 修改： `entrypoints/sidepanel/App.tsx`
+- 新建： `tests/unit/render-markdown.test.ts`
+- 新建： `tests/unit/sidepanel-flow.test.tsx`
 
-**Interfaces:**
-- Consumes: `TaskOrchestrator`, domain documents, `ModelSettings`.
-- Produces: `renderMarkdown`, `timestampUrl`, complete prepare/running/partial/completed/error UI.
+**接口关系：**
+- 输入依赖：`TaskOrchestrator`、领域文档和 `ModelSettings`。
+- 产出接口：`renderMarkdown`、`timestampUrl`，以及完整的准备中、运行中、部分完成、已完成和错误界面。
 
-- [ ] **Step 1: Write failing renderer and UI flow tests**
+- [ ] **步骤 1：编写失败的渲染器与 UI 流程测试**
 
 ```ts
 it('renders Chinese-only metadata and YouTube timestamps', () => {
@@ -969,15 +969,15 @@ it('shows retry for a partial task and download for a completed task', () => {
 })
 ```
 
-- [ ] **Step 2: Verify tests fail**
+- [ ] **步骤 2：确认测试失败**
 
-Run: `pnpm vitest run tests/unit/render-markdown.test.ts tests/unit/sidepanel-flow.test.tsx`
+执行：`pnpm vitest run tests/unit/render-markdown.test.ts tests/unit/sidepanel-flow.test.tsx`
 
-Expected: FAIL because renderer and views do not exist.
+预期：测试失败，原因是渲染器和界面组件尚不存在。
 
-- [ ] **Step 3: Implement safe Markdown and all approved UI states**
+- [ ] **步骤 3：实现安全的 Markdown 与全部已确认界面状态**
 
-`renderMarkdown` must emit title, available metadata, source URL, mode, local ISO timestamp, and mode-specific sections. Escape Markdown control characters in platform metadata. Generate timestamps only from validated source paragraph IDs. Omit empty author/facts/examples sections.
+`renderMarkdown` 必须输出标题、可用元数据、来源 URL、处理模式、本地 ISO 时间戳和模式专属章节。平台元数据中的 Markdown 控制字符必须转义；时间戳只能由已校验的来源自然段 ID 生成；作者、事实或案例为空时省略对应章节。
 
 ```ts
 export type RenderOptions = {
@@ -993,11 +993,11 @@ export function downloadMarkdown(filename: string, markdown: string): void {
 }
 ```
 
-Implement unconfigured, ready, running, partial, completed, and failed views. The running view displays stage, `completed/total`, percentage, elapsed time, and cancel. The partial view exposes retry and explicitly labeled partial export. The result view exposes preview, copy, download, and regenerate. Persist only subtitle-track preference, mode, and timestamp preference; do not persist generated documents in MVP.
+实现未配置、准备、运行中、部分完成、已完成和失败六种界面。运行中界面显示阶段、`completed/total`、百分比、已用时间和取消操作；部分完成界面提供重试，并明确标记“导出不完整结果”；结果界面提供预览、复制、下载和重新生成。只持久化字幕轨道偏好、处理模式和时间戳偏好；MVP 不持久化生成文档。
 
-- [ ] **Step 4: Verify UI, accessibility, and build**
+- [ ] **步骤 4：验证 UI、无障碍属性与生产构建**
 
-Run:
+执行：
 
 ```bash
 pnpm vitest run tests/unit/render-markdown.test.ts tests/unit/sidepanel-flow.test.tsx
@@ -1005,36 +1005,36 @@ pnpm typecheck
 pnpm build
 ```
 
-Expected: all state transitions and renderer cases PASS; buttons have accessible names; production build exits 0.
+预期：所有状态转换和渲染器用例通过，按钮具备无障碍名称，生产构建退出码为 0。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add src/markdown src/storage src/components entrypoints/sidepanel/App.tsx tests/unit/render-markdown.test.ts tests/unit/sidepanel-flow.test.tsx
 git commit -m "feat: complete side panel conversion flow"
 ```
 
-## Task 11: Packaged Extension E2E, Privacy, and Open-Source Release Baseline
+## 任务 11：插件端到端测试、隐私文档与开源发布基线
 
-**Files:**
-- Create: `playwright.config.ts`
-- Create: `tests/e2e/extension-smoke.spec.ts`
-- Create: `tests/e2e/fixtures/video-page.html`
-- Create: `README.md`
-- Create: `README.zh-CN.md`
-- Create: `CONTRIBUTING.md`
-- Create: `SECURITY.md`
-- Create: `PRIVACY.md`
-- Create: `LICENSE`
-- Create: `.github/ISSUE_TEMPLATE/bug_report.yml`
-- Create: `.github/pull_request_template.md`
-- Create: `.github/workflows/release.yml`
+**涉及文件：**
+- 新建： `playwright.config.ts`
+- 新建： `tests/e2e/extension-smoke.spec.ts`
+- 新建： `tests/e2e/fixtures/video-page.html`
+- 新建： `README.md`
+- 新建： `README.zh-CN.md`
+- 新建： `CONTRIBUTING.md`
+- 新建： `SECURITY.md`
+- 新建： `PRIVACY.md`
+- 新建： `LICENSE`
+- 新建： `.github/ISSUE_TEMPLATE/bug_report.yml`
+- 新建： `.github/pull_request_template.md`
+- 新建： `.github/workflows/release.yml`
 
-**Interfaces:**
-- Consumes: packaged WXT extension and every previous task.
-- Produces: `fixtureServer`, `installMockModelRoute`, `openExtensionSidePanel`, reproducible local verification, contributor documentation, privacy disclosure, and zipped release artifact.
+**接口关系：**
+- 输入依赖：打包后的 WXT 插件及此前全部任务产物。
+- 产出接口：`fixtureServer`、`installMockModelRoute`、`openExtensionSidePanel`、可复现的本地验证、贡献者文档、隐私声明和 ZIP 发布包。
 
-- [ ] **Step 1: Write the failing packaged-extension smoke test**
+- [ ] **步骤 1：编写失败的打包插件冒烟测试**
 
 ```ts
 test('opens the side panel shell and completes a mocked subtitle conversion', async ({ context }) => {
@@ -1048,17 +1048,17 @@ test('opens the side panel shell and completes a mocked subtitle conversion', as
 })
 ```
 
-- [ ] **Step 2: Build and verify the E2E test initially fails at missing harness helpers**
+- [ ] **步骤 2：构建并确认端到端测试因测试工具缺失而失败**
 
-Run: `pnpm build && pnpm playwright test tests/e2e/extension-smoke.spec.ts`
+执行：`pnpm build && pnpm playwright test tests/e2e/extension-smoke.spec.ts`
 
-Expected: FAIL because the fixture server and packaged-extension harness are not configured.
+预期：测试失败，原因是样本服务器和打包插件测试环境尚未配置。
 
-- [ ] **Step 3: Implement the deterministic E2E harness and documentation**
+- [ ] **步骤 3：实现确定性的端到端测试环境与项目文档**
 
-Configure persistent Chromium with `.output/chrome-mv3` loaded. Serve a local synthetic video page whose bridge payload matches the domain schema. Route model calls to a local deterministic response; no real API Key or live platform request is permitted in CI.
+启动持久化 Chromium 并加载 `.output/chrome-mv3`。提供一个本地虚拟视频页面，其桥接数据符合领域 Schema。模型请求统一路由到本地确定性响应；CI 中禁止使用真实 API Key 或访问实时视频平台。
 
-Define the E2E helpers with these exact contracts:
+使用以下准确契约定义端到端测试辅助函数：
 
 ```ts
 type FixtureServer = {
@@ -1083,13 +1083,13 @@ async function openExtensionSidePanel(context: BrowserContext): Promise<Page> {
 }
 ```
 
-README files must document installation, developer mode loading, supported platforms, both modes, BYOK setup, permissions, privacy, known MVP limits, build/test commands, and the lack of audio transcription. `PRIVACY.md` must state exactly which subtitle text is sent to the user-selected model provider. `SECURITY.md` must provide private vulnerability reporting guidance and prohibit secrets in issues.
+README 必须说明安装方式、开发者模式加载、支持的平台、两种处理模式、BYOK 配置、权限、隐私、MVP 已知限制、构建与测试命令，以及不支持音频转写。`PRIVACY.md` 必须准确说明哪些字幕文本会发送给用户选择的模型服务商；`SECURITY.md` 必须提供非公开漏洞报告方式，并禁止在 Issue 中粘贴密钥。
 
-Use the standard MIT license text with year 2026. Configure release workflow to run the full CI suite and `pnpm zip`, then attach the generated Chrome ZIP for version tags.
+使用年份为 2026 的标准 MIT License 文本。Release 工作流运行完整 CI 和 `pnpm zip`，并在版本标签发布时附加生成的 Chrome ZIP。
 
-- [ ] **Step 4: Run the complete release gate**
+- [ ] **步骤 4：运行完整发布门禁**
 
-Run:
+执行：
 
 ```bash
 pnpm lint
@@ -1101,45 +1101,45 @@ pnpm zip
 git diff --check
 ```
 
-Expected: every command exits 0; unit/integration/E2E tests report zero failures; `.output/*-chrome.zip` exists; no test performs a live model or video-platform request.
+预期：每条命令退出码为 0；单元、集成和端到端测试均为零失败；`.output/*-chrome.zip` 存在；所有测试都不访问真实模型或实时视频平台。
 
-- [ ] **Step 5: Perform manual platform smoke tests and commit**
+- [ ] **步骤 5：执行真实平台人工冒烟测试并提交**
 
-Load `.output/chrome-mv3` in a clean Chrome profile. Verify one public captioned YouTube video and one public captioned Bilibili video: metadata, track selection, high-fidelity generation, refined generation, timestamp links, cancel, copy, and download. Record only video URLs and pass/fail results in the release notes; do not commit captured subtitles.
+在干净的 Chrome 配置中加载 `.output/chrome-mv3`。分别选择一个带公开字幕的 YouTube 视频和哔哩哔哩视频，验证元数据、字幕轨道选择、高保真生成、AI 精炼生成、时间戳链接、取消、复制和下载。发布记录中只记录视频 URL 与通过/失败结果，不提交抓取到的字幕。
 
 ```bash
 git add playwright.config.ts tests/e2e README.md README.zh-CN.md CONTRIBUTING.md SECURITY.md PRIVACY.md LICENSE .github
 git commit -m "docs: add release and open source baseline"
 ```
 
-## Specification Coverage Matrix
+## 规格覆盖矩阵
 
-| Specification area | Implemented by |
+| 规格范围 | 对应任务 |
 |---|---|
-| Chrome MV3, Side Panel, toolchain, minimum Chrome 114 | Task 1 |
-| Domain model, runtime validation, stable errors, redaction | Task 2 |
-| BYOK storage, HTTPS validation, exact-origin permission | Task 3 |
-| OpenAI-compatible calls, abort, rate limits, retry | Task 4 |
-| Subtitle cleanup, rolling-caption overlap, paragraphs, chunking | Task 5 |
-| Chinese deterministic path, English translation, refined map/reduce | Task 6 |
-| YouTube existing-caption extraction | Task 7 |
-| Bilibili existing-caption extraction | Task 8 |
-| Foreground lifecycle, progress, cancel, partial result, retry | Task 9 |
-| Chinese-only Markdown, timestamps, preview, copy, download, UI states | Task 10 |
-| E2E, privacy, contributor docs, license, release archive | Task 11 |
-| Excluded audio transcription, cloud accounts, Feishu, native Gemini/Claude | Global Constraints and README verification in Task 11 |
+| Chrome MV3、Side Panel、工具链、最低 Chrome 114 | 任务 1 |
+| 领域模型、运行时校验、稳定错误码、密钥脱敏 | 任务 2 |
+| BYOK 存储、HTTPS 校验、精确来源授权 | 任务 3 |
+| OpenAI 兼容调用、取消、限速与重试 | 任务 4 |
+| 字幕清洗、滚动字幕重叠、自然段恢复与分块 | 任务 5 |
+| 中文字幕确定性路径、英文翻译、精炼 map/reduce | 任务 6 |
+| YouTube 已有字幕提取 | 任务 7 |
+| 哔哩哔哩已有字幕提取 | 任务 8 |
+| 前台生命周期、进度、取消、部分结果与重试 | 任务 9 |
+| 纯中文 Markdown、时间戳、预览、复制、下载和 UI 状态 | 任务 10 |
+| 端到端测试、隐私、贡献文档、许可证与发布包 | 任务 11 |
+| 排除音频转写、云账号、飞书和 Gemini/Claude 原生协议 | 全局约束及任务 11 的 README 验证 |
 
-## Final Verification Checklist
+## 最终验证清单
 
-- [ ] `git status --short` shows only intentional changes.
-- [ ] `pnpm lint` exits 0.
-- [ ] `pnpm typecheck` exits 0.
-- [ ] `pnpm test` reports zero failures.
-- [ ] `pnpm build` produces a valid Chrome MV3 extension with minimum Chrome 114.
-- [ ] `pnpm playwright test` completes without live external dependencies.
-- [ ] `pnpm zip` creates the installable Chrome archive.
-- [ ] The built manifest contains only approved permissions and optional HTTPS model origins.
-- [ ] Secret-scanning tests prove an API Key cannot appear in messages, errors, logs, or Markdown.
-- [ ] YouTube and Bilibili manual smoke tests pass on currently available public captioned videos.
-- [ ] README and privacy documentation match actual data flow and limitations.
-- [ ] Every task is committed separately with the specified commit boundary.
+- [ ] `git status --short` 只显示预期变更。
+- [ ] `pnpm lint` 退出码为 0。
+- [ ] `pnpm typecheck` 退出码为 0。
+- [ ] `pnpm test` 报告零失败。
+- [ ] `pnpm build` 生成最低支持 Chrome 114 的有效 MV3 插件。
+- [ ] `pnpm playwright test` 在不依赖实时外部服务的情况下完成。
+- [ ] `pnpm zip` 生成可安装的 Chrome 压缩包。
+- [ ] 构建后的 Manifest 只包含已批准权限和可选 HTTPS 模型来源。
+- [ ] 密钥扫描测试证明 API Key 不会出现在消息、错误、日志或 Markdown 中。
+- [ ] YouTube 和哔哩哔哩人工冒烟测试在当前可用的公开字幕视频上通过。
+- [ ] README 与隐私文档符合实际数据流和功能限制。
+- [ ] 每个任务都按照指定提交边界单独提交。
