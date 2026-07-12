@@ -1,0 +1,29 @@
+{
+  "wireMagic": "pb3",
+  "pens": [],
+  "wsWinStyles": [],
+  "events": [
+    {
+      "tStartMs": 1200,
+      "dDurationMs": 1600,
+      "segs": [
+        { "utf8": "Welcome to the test." }
+      ]
+    },
+    {
+      "tStartMs": 3000,
+      "dDurationMs": 2000,
+      "segs": [
+        { "utf8": "Today we discuss" },
+        { "utf8": " artificial intelligence." }
+      ]
+    },
+    {
+      "tStartMs": 5200,
+      "dDurationMs": 1800,
+      "segs": [
+        { "utf8": "AI is transforming the world." }
+      ]
+    }
+  ]
+}

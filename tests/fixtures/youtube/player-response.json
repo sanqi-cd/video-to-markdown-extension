@@ -1,0 +1,33 @@
+{
+  "videoDetails": {
+    "videoId": "test123",
+    "title": "AI Agents Explained",
+    "author": "Tech Channel",
+    "lengthSeconds": "1200"
+  },
+  "captions": {
+    "playerCaptionsTracklistRenderer": {
+      "captionTracks": [
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=test123&lang=en",
+          "languageCode": "en",
+          "name": { "simpleText": "English" },
+          "vssId": ".en"
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=test123&lang=zh-Hans",
+          "languageCode": "zh-Hans",
+          "name": { "simpleText": "中文（简体）" },
+          "vssId": ".zh-Hans"
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=test123&lang=ja",
+          "languageCode": "ja",
+          "name": { "simpleText": "日本語" },
+          "vssId": ".ja",
+          "kind": "asr"
+        }
+      ]
+    }
+  }
+}
