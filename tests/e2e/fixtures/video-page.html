@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Test Video - YouTube</title>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      // Mock ytInitialPlayerResponse for the YouTube adapter
+      window.ytInitialPlayerResponse = {
+        videoDetails: {
+          videoId: 'e2e-test-video',
+          title: 'E2E Test Video',
+          author: 'Test Channel',
+          lengthSeconds: '300',
+        },
+        captions: {
+          playerCaptionsTracklistRenderer: {
+            captionTracks: [
+              {
+                baseUrl: 'https://www.youtube.com/api/timedtext?v=e2e-test&lang=en',
+                languageCode: 'en',
+                name: { simpleText: 'English' },
+                vssId: '.en',
+              },
+            ],
+          },
+        },
+      }
+    </script>
+  </body>
+</html>
