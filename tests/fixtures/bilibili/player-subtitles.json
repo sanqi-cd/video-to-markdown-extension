@@ -1,0 +1,22 @@
+{
+  "code": 0,
+  "data": {
+    "subtitle": {
+      "subtitles": [
+        {
+          "id": 12345,
+          "lan": "zh-CN",
+          "lan_doc": "中文（简体）",
+          "subtitle_url": "https://i0.hdslb.com/bfs/ai_subtitle/12345.json"
+        },
+        {
+          "id": 12346,
+          "lan": "en",
+          "lan_doc": "英语",
+          "subtitle_url": "https://i0.hdslb.com/bfs/ai_subtitle/12346.json",
+          "ai_status": 1
+        }
+      ]
+    }
+  }
+}
