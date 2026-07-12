@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AppError } from '../errors/app-error'
 import type { ModelConfigStore } from '../model/config-store'
+import type { ModelProvider } from './contracts'
 
 const ExtensionMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('VIDEO_CONTEXT_REQUEST') }),
@@ -29,31 +30,25 @@ export function parseExtensionMessage(input: unknown): ExtensionMessage {
 
 type Sender = { url?: string }
 
-type RouterDependencies = {
-  configStore: ModelConfigStore
-  isExtensionOrigin: (sender: Sender) => boolean
-}
-
-/**
- * Public message types that content scripts can invoke without auth.
- */
-const PUBLIC_MESSAGES = new Set(['VIDEO_CONTEXT_REQUEST', 'SUBTITLE_CUES_REQUEST'])
-
-/**
- * Privileged messages that require an extension origin sender.
- */
-const PRIVILEGED_MESSAGES = new Set([
+const PRIVILEGED = new Set([
   'MODEL_TEST_REQUEST',
   'MODEL_COMPLETE_REQUEST',
   'MODEL_CANCEL_REQUEST',
 ])
 
-export function createMessageRouter(deps: RouterDependencies) {
+type RouterDeps = {
+  configStore: ModelConfigStore
+  isExtensionOrigin: (sender: Sender) => boolean
+  createProvider?: (config: NonNullable<Awaited<ReturnType<ModelConfigStore['get']>>>) => ModelProvider
+  getActiveRequestIds?: () => Set<string>
+  cancelRequest?: (id: string) => void
+}
+
+export function createMessageRouter(deps: RouterDeps) {
   return async function routeMessage(
     raw: unknown,
     sender: Sender,
   ): Promise<unknown> {
-    // Parse and validate the message
     let message: ExtensionMessage
     try {
       message = parseExtensionMessage(raw)
@@ -61,36 +56,41 @@ export function createMessageRouter(deps: RouterDependencies) {
       throw new AppError('INVALID_MODEL_CONFIG', '无效的消息格式')
     }
 
-    const isExtension = deps.isExtensionOrigin(sender)
-
-    // Content scripts can only send public messages
-    if (!isExtension && PRIVILEGED_MESSAGES.has(message.type)) {
+    if (!deps.isExtensionOrigin(sender) && PRIVILEGED.has(message.type)) {
       throw new AppError('INVALID_MODEL_CONFIG', '无权执行此操作')
     }
 
-    // Route to handler
     switch (message.type) {
       case 'VIDEO_CONTEXT_REQUEST':
-        // Handled by content script adapter — return placeholder
-        return { platform: 'unknown' }
-
       case 'SUBTITLE_CUES_REQUEST':
-        return { cues: [] }
+        return { forwarded: true }
 
-      case 'MODEL_TEST_REQUEST':
-      case 'MODEL_COMPLETE_REQUEST': {
+      case 'MODEL_TEST_REQUEST': {
         const config = await deps.configStore.get()
-        if (!config) {
-          throw new AppError('INVALID_MODEL_CONFIG', '请先配置模型')
-        }
+        if (!config) throw new AppError('INVALID_MODEL_CONFIG', '请先配置模型')
+        if (!deps.createProvider) throw new AppError('INVALID_MODEL_CONFIG', '模型服务未就绪')
+        const provider = deps.createProvider(config)
+        await provider.testConnection()
         return { ok: true }
       }
 
+      case 'MODEL_COMPLETE_REQUEST': {
+        const config = await deps.configStore.get()
+        if (!config) throw new AppError('INVALID_MODEL_CONFIG', '请先配置模型')
+        if (!deps.createProvider) throw new AppError('INVALID_MODEL_CONFIG', '模型服务未就绪')
+        const provider = deps.createProvider(config)
+        const response = await provider.complete(
+          { messages: message.messages, responseFormat: 'json' },
+        )
+        return { content: response.content }
+      }
+
       case 'MODEL_CANCEL_REQUEST':
+        deps.cancelRequest?.(message.requestId)
         return { cancelled: true }
 
       default:
-        throw new AppError('INVALID_MODEL_CONFIG', '未知的消息类型')
+        throw new AppError('INVALID_MODEL_CONFIG', '未知消息类型')
     }
   }
 }

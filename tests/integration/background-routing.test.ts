@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createMessageRouter } from '../../src/core/messages'
 import type { ModelConfig, ModelConfigStore } from '../../src/model/config-store'
+import type { ModelProvider } from '../../src/core/contracts'
 
-// A simple in-memory config store mock
 function mockConfigStore(saved: ModelConfig | null): ModelConfigStore {
   let config = saved
   return {
@@ -16,8 +16,22 @@ function mockConfigStore(saved: ModelConfig | null): ModelConfigStore {
   }
 }
 
+function mockProvider(): ModelProvider {
+  return {
+    testConnection: vi.fn().mockResolvedValue(undefined),
+    complete: vi.fn().mockResolvedValue({ content: 'ok' }),
+  }
+}
+
 const CONTENT_SENDER = { url: 'https://www.youtube.com/watch?v=test123' }
-const EXTENSION_SENDER = { url: `chrome-extension://abc123/sidepanel.html` }
+const EXTENSION_SENDER = { url: 'chrome-extension://abc123/sidepanel.html' }
+
+const testConfig: ModelConfig = {
+  apiKey: 'sk-test',
+  baseUrl: 'https://api.example.com/v1',
+  model: 'gpt-4o',
+  contextWindow: 128000,
+}
 
 describe('message router', () => {
   it('rejects an unknown message type', async () => {
@@ -48,7 +62,6 @@ describe('message router', () => {
       isExtensionOrigin: () => false,
     })
 
-    // Video context doesn't require extension origin
     const result = await router(
       { type: 'VIDEO_CONTEXT_REQUEST' },
       CONTENT_SENDER,
@@ -56,23 +69,36 @@ describe('message router', () => {
     expect(result).toBeDefined()
   })
 
-  it('allows MODEL_TEST_REQUEST from an extension sender', async () => {
-    const config = {
-      apiKey: 'sk-test',
-      baseUrl: 'https://api.example.com/v1',
-      model: 'gpt-4o',
-      contextWindow: 128000,
-    }
+  it('handles MODEL_TEST_REQUEST from extension with mock provider', async () => {
     const router = createMessageRouter({
-      configStore: mockConfigStore(config),
+      configStore: mockConfigStore(testConfig),
       isExtensionOrigin: () => true,
+      createProvider: () => mockProvider(),
     })
 
     const result = await router(
       { type: 'MODEL_TEST_REQUEST' },
       EXTENSION_SENDER,
     )
-    expect(result).toBeDefined()
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('handles MODEL_COMPLETE_REQUEST from extension with mock provider', async () => {
+    const router = createMessageRouter({
+      configStore: mockConfigStore(testConfig),
+      isExtensionOrigin: () => true,
+      createProvider: () => mockProvider(),
+    })
+
+    const result = await router(
+      {
+        type: 'MODEL_COMPLETE_REQUEST',
+        requestId: '550e8400-e29b-41d4-a716-446655440000',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+      EXTENSION_SENDER,
+    )
+    expect(result).toEqual({ content: 'ok' })
   })
 
   it('rejects MODEL_COMPLETE_REQUEST from a content script', async () => {
@@ -97,6 +123,7 @@ describe('message router', () => {
     const router = createMessageRouter({
       configStore: mockConfigStore(null),
       isExtensionOrigin: () => true,
+      createProvider: () => mockProvider(),
     })
 
     await expect(
