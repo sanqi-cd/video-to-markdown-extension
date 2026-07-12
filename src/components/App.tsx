@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { PrepareView } from '../../src/components/PrepareView'
-import { ProgressView } from '../../src/components/ProgressView'
-import { ResultView, PartialResultView, ErrorView } from '../../src/components/ResultView'
-import { ModelSettings } from '../../src/components/ModelSettings'
+import { PrepareView } from './PrepareView'
+import { ProgressView } from './ProgressView'
+import { ResultView, PartialResultView, ErrorView } from './ResultView'
+import { ModelSettings } from './ModelSettings'
 import { TaskOrchestrator } from '../../src/core/orchestrator'
 import { YouTubeAdapter } from '../../src/adapters/youtube/adapter'
 import { BilibiliAdapter } from '../../src/adapters/bilibili/adapter'
@@ -13,7 +13,7 @@ import type { SubtitleAdapter, ModelProvider, ModelRequest, ModelResponse, Video
 import type { BridgePayload } from '../../src/adapters/shared/page-bridge'
 import type { BilibiliContextPayload } from '../../src/adapters/bilibili/schemas'
 
-// ── Simple in-memory config store (Side Panel has access to chrome.storage) ──
+// ── Config store ──
 function createSidePanelConfigStore(): ModelConfigStore {
   const KEY = 'modelConfig'
   return {
@@ -30,14 +30,14 @@ function createSidePanelConfigStore(): ModelConfigStore {
   }
 }
 
-// ── Provider that talks to background for model calls ──
+// ── Provider that talks to background ──
 function createBackgroundProvider(): ModelProvider {
   return {
-    async testConnection(signal?: AbortSignal) {
+    async testConnection() {
       const resp = await chrome.runtime.sendMessage({ type: 'MODEL_TEST_REQUEST' })
       if (!resp?.success) throw new Error(resp?.error ?? '连接测试失败')
     },
-    async complete(request: ModelRequest, signal?: AbortSignal): Promise<ModelResponse> {
+    async complete(request: ModelRequest): Promise<ModelResponse> {
       const resp = await chrome.runtime.sendMessage({
         type: 'MODEL_COMPLETE_REQUEST',
         requestId: crypto.randomUUID(),
@@ -64,14 +64,14 @@ export function App() {
   const adapterRef = useRef<SubtitleAdapter | null>(null)
   const orchestratorRef = useRef<TaskOrchestrator | null>(null)
   const [phase, setPhase] = useState<AppPhase>({ tag: 'loading' })
+  const [isTesting, setIsTesting] = useState(false)
+  const [testError, setTestError] = useState<string | null>(null)
 
-  // Preferences
   const [selectedTrackId, setSelectedTrackId] = useState('')
   const [mode, setMode] = useState<'high-fidelity' | 'refined'>('high-fidelity')
   const [includeTimestamps, setIncludeTimestamps] = useState(false)
   const [sourceLanguage, setSourceLanguage] = useState('zh')
 
-  // Check config on mount, then load video context
   useEffect(() => {
     void (async () => {
       const cfg = await configStore.current.get()
@@ -84,24 +84,30 @@ export function App() {
     })()
   }, [])
 
-  const loadVideoContext = async () => {
+  const loadVideoContext = useCallback(async () => {
     setPhase({ tag: 'loading' })
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) {
-        setPhase({ tag: 'no_video' })
-        return
-      }
+      if (!tab?.id) { setPhase({ tag: 'no_video' }); return }
+
+      // Wait a moment for content scripts to inject
+      await new Promise((r) => setTimeout(r, 300))
+
       const resp = await chrome.tabs.sendMessage(tab.id, { type: 'VIDEO_CONTEXT_REQUEST' })
       if (!resp?.success) {
-        setPhase({ tag: 'no_video' })
+        // Check if we're on a supported domain
+        const url = tab.url ?? ''
+        if (url.includes('youtube.com/watch') || url.includes('bilibili.com/video')) {
+          // On a video page but no context — content script may not have injected yet
+          setPhase({ tag: 'no_video' })
+        } else {
+          setPhase({ tag: 'no_video' })
+        }
         return
       }
 
       const data = resp.data as Record<string, unknown>
-      // Determine platform from payload shape
       if ('tracks' in data) {
-        // YouTube bridge payload
         const payload = data as BridgePayload
         const adapter = new YouTubeAdapter(payload)
         const metadata = await adapter.getVideoMetadata()
@@ -111,7 +117,6 @@ export function App() {
         setSelectedTrackId(tracks[0]?.id ?? '')
         setPhase({ tag: 'ready', metadata, tracks })
       } else if ('bvid' in data) {
-        // Bilibili bridge payload
         const payload = data as BilibiliContextPayload
         const adapter = new BilibiliAdapter(payload)
         const metadata = await adapter.getVideoMetadata()
@@ -126,11 +131,38 @@ export function App() {
     } catch {
       setPhase({ tag: 'no_video' })
     }
-  }
+  }, [])
 
-  const handleConfigured = useCallback((cfg: ModelConfig) => {
+  const handleSaveConfig = useCallback(async (cfg: ModelConfig) => {
+    await configStore.current.set(cfg)
     setConfig(cfg)
+    setPhase({ tag: 'loading' })
+    // Small delay so content scripts have time on the switched tab
+    await new Promise((r) => setTimeout(r, 500))
     void loadVideoContext()
+  }, [loadVideoContext])
+
+  const handleTestConnection = useCallback(async (cfg: ModelConfig) => {
+    setIsTesting(true)
+    setTestError(null)
+    try {
+      // Save first, then test so background has the config
+      await configStore.current.set(cfg)
+      // Use background provider to test
+      const provider = createBackgroundProvider()
+      await provider.testConnection()
+      setTestError(null)
+    } catch (e) {
+      setTestError(e instanceof Error ? e.message : '测试失败')
+    } finally {
+      setIsTesting(false)
+    }
+  }, [])
+
+  const handleDeleteConfig = useCallback(async () => {
+    await configStore.current.clear()
+    setConfig(null)
+    setPhase({ tag: 'unconfigured' })
   }, [])
 
   const handleStart = useCallback(() => {
@@ -141,14 +173,8 @@ export function App() {
     const orchestrator = new TaskOrchestrator(adapter, provider)
     orchestratorRef.current = orchestrator
 
-    orchestrator.onStateChange((state) => {
-      setPhase({ tag: 'task', state })
-    })
-
-    setPhase({
-      tag: 'task',
-      state: orchestrator.getState(),
-    })
+    orchestrator.onStateChange((state) => setPhase({ tag: 'task', state }))
+    setPhase({ tag: 'task', state: orchestrator.getState() })
 
     const request: StartRequest = {
       trackId: selectedTrackId,
@@ -159,16 +185,11 @@ export function App() {
     void orchestrator.start(request)
   }, [adapterRef, phase, selectedTrackId, mode, sourceLanguage, includeTimestamps])
 
-  const handleCancel = useCallback(() => {
-    orchestratorRef.current?.cancel()
-  }, [])
+  const handleCancel = useCallback(() => orchestratorRef.current?.cancel(), [])
 
   const handleCopy = useCallback(async () => {
     if (phase.tag === 'task' && phase.state.status === 'completed') {
-      const md = renderMarkdown(phase.state.document, {
-        includeTimestamps,
-        generatedAt: new Date(),
-      })
+      const md = renderMarkdown(phase.state.document, { includeTimestamps, generatedAt: new Date() })
       await navigator.clipboard.writeText(md)
     }
   }, [phase, includeTimestamps])
@@ -182,106 +203,74 @@ export function App() {
   }, [phase, includeTimestamps])
 
   // ── Render ──
-  switch (phase.tag) {
-    case 'unconfigured':
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
-          <ModelSettings
-            onSave={async (cfg) => {
-              await configStore.current.set(cfg)
-              handleConfigured(cfg)
-            }}
-            onTest={async () => {}}
-            onDelete={async () => {
-              await configStore.current.clear()
-              setConfig(null)
-              setPhase({ tag: 'unconfigured' })
-            }}
-            savedConfig={config}
-            isTesting={false}
-            testError={null}
-          />
-        </main>
-      )
+  return (
+    <main className="app-container">
+      <h1>Video to Markdown</h1>
 
-    case 'loading':
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
+      {phase.tag === 'unconfigured' && (
+        <ModelSettings
+          onSave={handleSaveConfig}
+          onTest={handleTestConnection}
+          onDelete={handleDeleteConfig}
+          savedConfig={config}
+          isTesting={isTesting}
+          testError={testError}
+        />
+      )}
+
+      {phase.tag === 'loading' && (
+        <div className="status-box">
           <p>正在读取视频信息…</p>
-        </main>
-      )
+        </div>
+      )}
 
-    case 'no_video':
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
+      {phase.tag === 'no_video' && (
+        <div className="status-box">
           <p>请打开 YouTube 或哔哩哔哩视频页面</p>
-        </main>
-      )
+          <p className="hint">打开视频后点击下方按钮重试</p>
+          <button type="button" onClick={() => { void loadVideoContext() }}>
+            刷新页面状态
+          </button>
+        </div>
+      )}
 
-    case 'ready':
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
-          <PrepareView
-            metadata={phase.metadata}
-            tracks={phase.tracks}
-            selectedTrackId={selectedTrackId}
-            mode={mode}
-            includeTimestamps={includeTimestamps}
-            onTrackChange={setSelectedTrackId}
-            onModeChange={setMode}
-            onTimestampsChange={setIncludeTimestamps}
-            onStart={handleStart}
-          />
-        </main>
-      )
+      {phase.tag === 'ready' && (
+        <PrepareView
+          metadata={phase.metadata}
+          tracks={phase.tracks}
+          selectedTrackId={selectedTrackId}
+          mode={mode}
+          includeTimestamps={includeTimestamps}
+          onTrackChange={setSelectedTrackId}
+          onModeChange={setMode}
+          onTimestampsChange={setIncludeTimestamps}
+          onStart={handleStart}
+        />
+      )}
 
-    case 'task': {
-      const { state } = phase
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
-          {state.status === 'running' && (
-            <ProgressView
-              stage={state.stage}
-              completed={state.completed}
-              total={state.total}
-              startedAt={state.startedAt}
-              onCancel={handleCancel}
-            />
-          )}
-          {state.status === 'completed' && (
-            <ResultView
-              document={state.document}
-              markdown={renderMarkdown(state.document, {
-                includeTimestamps,
-                generatedAt: new Date(),
-              })}
-              onCopy={handleCopy}
-              onDownload={handleDownload}
-            />
-          )}
-          {state.status === 'partial' && (
-            <PartialResultView
-              failedCount={state.failedChunks.length}
-              onRetry={handleStart}
-            />
-          )}
-          {state.status === 'failed' && <ErrorView error={state.error} />}
-          {state.status === 'cancelled' && <p>任务已取消</p>}
-        </main>
-      )
-    }
-
-    default:
-      return (
-        <main>
-          <h1>Video to Markdown</h1>
-          <p>请先配置模型</p>
-        </main>
-      )
-  }
+      {phase.tag === 'task' && (() => {
+        const { state } = phase
+        return (
+          <>
+            {state.status === 'running' && (
+              <ProgressView stage={state.stage} completed={state.completed} total={state.total}
+                startedAt={state.startedAt} onCancel={handleCancel} />
+            )}
+            {state.status === 'completed' && (
+              <ResultView document={state.document}
+                markdown={renderMarkdown(state.document, { includeTimestamps, generatedAt: new Date() })}
+                onCopy={handleCopy} onDownload={handleDownload} />
+            )}
+            {state.status === 'partial' && (
+              <PartialResultView failedCount={state.failedChunks.length} onRetry={handleStart} />
+            )}
+            {state.status === 'failed' && <ErrorView error={state.error} />}
+            {state.status === 'cancelled' && (
+              <div className="status-box"><p>任务已取消</p></div>
+            )}
+          </>
+        )
+      })()}
+    </main>
+  )
 }

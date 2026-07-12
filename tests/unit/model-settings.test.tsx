@@ -31,14 +31,7 @@ describe('ModelSettings', () => {
     expect(keyInput).toHaveAttribute('type', 'password')
   })
 
-  it('does not display the stored key as plain text', () => {
-    renderSettings({ savedConfig })
-    const keyInput = screen.getByLabelText('API Key') as HTMLInputElement
-    // The stored key should not be visible — the input shows placeholder dots
-    expect(keyInput.value).not.toBe('sk-saved-secret-key')
-  })
-
-  it('renders base URL and model fields pre-filled from saved config', () => {
+  it('pre-fills fields from saved config', () => {
     renderSettings({ savedConfig })
     const baseUrlInput = screen.getByLabelText('Base URL') as HTMLInputElement
     const modelInput = screen.getByLabelText('模型名称') as HTMLInputElement
@@ -63,11 +56,11 @@ describe('ModelSettings', () => {
     })
   })
 
-  it('calls onTest when the test button is clicked', async () => {
+  it('calls onTest with form config when clicked', async () => {
     const { onTest } = renderSettings({ savedConfig })
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    expect(onTest).toHaveBeenCalledOnce()
+    expect(onTest).toHaveBeenCalledWith(savedConfig)
   })
 
   it('calls onDelete when the delete button is clicked', async () => {
@@ -79,11 +72,16 @@ describe('ModelSettings', () => {
 
   it('disables the test button while testing', () => {
     renderSettings({ savedConfig, isTesting: true })
-    expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '测试中…' })).toBeDisabled()
   })
 
   it('shows test error when provided', () => {
     renderSettings({ savedConfig, testError: '连接超时' })
     expect(screen.getByText('连接超时')).toBeVisible()
+  })
+
+  it('disables test button when form is empty', () => {
+    renderSettings()
+    expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled()
   })
 })

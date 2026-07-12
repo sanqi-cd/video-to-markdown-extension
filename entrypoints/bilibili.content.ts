@@ -1,21 +1,20 @@
 import { BilibiliContextSchema } from '../src/adapters/bilibili/schemas'
-import type { BilibiliContextPayload } from '../src/adapters/bilibili/schemas'
 
 export default defineContentScript({
   matches: ['https://www.bilibili.com/*', 'https://bilibili.com/*'],
   world: 'ISOLATED',
   runAt: 'document_idle',
   main() {
-    let context: BilibiliContextPayload | null = null
-
-    window.addEventListener('video-to-md:bilibili-context', ((event: CustomEvent) => {
-      const parsed = BilibiliContextSchema.safeParse(event.detail)
-      if (!parsed.success) {
-        console.error('Invalid Bilibili bridge payload', parsed.error)
-        return
+    function readContext() {
+      const raw = document.documentElement.getAttribute('data-v2md-bilibili')
+      if (!raw) return null
+      try {
+        const parsed = BilibiliContextSchema.safeParse(JSON.parse(raw))
+        return parsed.success ? parsed.data : null
+      } catch {
+        return null
       }
-      context = parsed.data
-    }) as EventListener)
+    }
 
     browser.runtime.onMessage.addListener((message) => {
       if (
@@ -23,8 +22,9 @@ export default defineContentScript({
         message !== null &&
         (message as { type?: string }).type === 'VIDEO_CONTEXT_REQUEST'
       ) {
-        if (context) {
-          return Promise.resolve({ success: true, data: context })
+        const ctx = readContext()
+        if (ctx) {
+          return Promise.resolve({ success: true, data: ctx })
         }
         return Promise.resolve({ success: false, error: 'NO_VIDEO_CONTEXT' })
       }

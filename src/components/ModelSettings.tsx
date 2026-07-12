@@ -3,7 +3,7 @@ import type { ModelConfig } from '../model/config-store'
 
 interface ModelSettingsProps {
   onSave: (config: ModelConfig) => Promise<void>
-  onTest: () => Promise<void>
+  onTest: (config: ModelConfig) => Promise<void>
   onDelete: () => Promise<void>
   savedConfig: ModelConfig | null
   isTesting: boolean
@@ -20,29 +20,38 @@ export function ModelSettings({
   isTesting,
   testError,
 }: ModelSettingsProps) {
-  const [apiKey, setApiKey] = useState(savedConfig ? '••••••••' : '')
+  const [apiKey, setApiKey] = useState(savedConfig?.apiKey ?? '')
   const [baseUrl, setBaseUrl] = useState(savedConfig?.baseUrl ?? '')
   const [model, setModel] = useState(savedConfig?.model ?? '')
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(!!savedConfig)
 
-  const hasSavedConfig = savedConfig !== null
+  const formFilled = apiKey.trim() && baseUrl.trim() && model.trim()
+
+  const buildConfig = (): ModelConfig => ({
+    apiKey: apiKey.trim(),
+    baseUrl: baseUrl.trim(),
+    model: model.trim(),
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
+  })
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await onSave({
-        apiKey,
-        baseUrl,
-        model,
-        contextWindow: savedConfig?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-      })
+      await onSave(buildConfig())
+      setSaved(true)
     } finally {
       setSaving(false)
     }
   }
 
+  const handleTest = async () => {
+    await onTest(buildConfig())
+  }
+
   return (
     <form
+      className="settings-form"
       onSubmit={(e) => {
         e.preventDefault()
         void handleSave()
@@ -56,6 +65,7 @@ export function ModelSettings({
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
         autoComplete="off"
+        placeholder="sk-..."
       />
 
       <label htmlFor="base-url">Base URL</label>
@@ -78,19 +88,29 @@ export function ModelSettings({
         placeholder="gpt-4o"
       />
 
-      <div>
-        <button type="submit" disabled={saving}>
-          保存
+      <div className="button-row">
+        <button type="submit" disabled={saving || !formFilled}>
+          {saving ? '保存中…' : saved ? '更新配置' : '保存'}
         </button>
-        <button type="button" onClick={() => void onTest()} disabled={isTesting || !hasSavedConfig}>
-          测试连接
+        <button
+          type="button"
+          onClick={() => void handleTest()}
+          disabled={isTesting || !formFilled}
+        >
+          {isTesting ? '测试中…' : '测试连接'}
         </button>
-        <button type="button" onClick={() => void onDelete()} disabled={!hasSavedConfig}>
-          删除配置
-        </button>
+        {savedConfig && (
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void onDelete()}
+          >
+            删除配置
+          </button>
+        )}
       </div>
 
-      {testError && <p role="alert">{testError}</p>}
+      {testError && <p role="alert" className="error">{testError}</p>}
     </form>
   )
 }

@@ -1,21 +1,21 @@
 import { BridgeEventSchema } from '../src/adapters/shared/page-bridge'
-import type { BridgePayload } from '../src/adapters/shared/page-bridge'
 
 export default defineContentScript({
   matches: ['https://www.youtube.com/*'],
   world: 'ISOLATED',
   runAt: 'document_idle',
   main() {
-    let payload: BridgePayload | null = null
-
-    window.addEventListener('video-to-md:youtube-context', ((event: CustomEvent) => {
-      const parsed = BridgeEventSchema.safeParse(event.detail)
-      if (!parsed.success) {
-        console.error('Invalid YouTube bridge payload', parsed.error)
-        return
+    // Read payload from DOM attribute (set by MAIN world) — no race condition
+    function readPayload() {
+      const raw = document.documentElement.getAttribute('data-v2md-youtube')
+      if (!raw) return null
+      try {
+        const parsed = BridgeEventSchema.safeParse(JSON.parse(raw))
+        return parsed.success ? parsed.data : null
+      } catch {
+        return null
       }
-      payload = parsed.data
-    }) as EventListener)
+    }
 
     browser.runtime.onMessage.addListener((message) => {
       if (
@@ -23,6 +23,7 @@ export default defineContentScript({
         message !== null &&
         (message as { type?: string }).type === 'VIDEO_CONTEXT_REQUEST'
       ) {
+        const payload = readPayload()
         if (payload) {
           return Promise.resolve({ success: true, data: payload })
         }

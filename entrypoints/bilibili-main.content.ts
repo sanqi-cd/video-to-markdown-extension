@@ -5,43 +5,45 @@ export default defineContentScript({
   world: 'MAIN',
   runAt: 'document_idle',
   main() {
-    const w = window as Window & {
-      __INITIAL_STATE__?: {
-        videoData?: {
-          aid?: number
-          bvid?: string
-          cid?: number
-          title?: string
-          duration?: number
-        }
-        upData?: {
-          name?: string
+    function extract() {
+      const w = window as Window & {
+        __INITIAL_STATE__?: {
+          videoData?: {
+            aid?: number
+            bvid?: string
+            cid?: number
+            title?: string
+            duration?: number
+          }
+          upData?: { name?: string }
         }
       }
+
+      const state = w.__INITIAL_STATE__
+      if (!state?.videoData) return
+      const { videoData, upData } = state
+      if (!videoData.bvid || !videoData.cid) return
+
+      const parsed = BilibiliContextSchema.safeParse({
+        bvid: videoData.bvid,
+        aid: videoData.aid ?? 0,
+        cid: videoData.cid,
+        title: videoData.title ?? '',
+        author: upData?.name,
+        durationMs: videoData.duration ? videoData.duration * 1000 : undefined,
+      })
+      if (!parsed.success) return
+
+      document.documentElement.setAttribute(
+        'data-v2md-bilibili',
+        JSON.stringify(parsed.data),
+      )
     }
 
-    const state = w.__INITIAL_STATE__
-    if (!state?.videoData) return
+    extract()
 
-    const { videoData, upData } = state
-    if (!videoData.bvid || !videoData.cid) return
-
-    const raw = {
-      bvid: videoData.bvid,
-      aid: videoData.aid ?? 0,
-      cid: videoData.cid,
-      title: videoData.title ?? '',
-      author: upData?.name,
-      durationMs: videoData.duration ? videoData.duration * 1000 : undefined,
-    }
-
-    const parsed = BilibiliContextSchema.safeParse(raw)
-    if (!parsed.success) return
-
-    window.dispatchEvent(
-      new CustomEvent('video-to-md:bilibili-context', {
-        detail: parsed.data,
-      }),
-    )
+    const observer = new MutationObserver(() => extract())
+    observer.observe(document.head, { childList: true, subtree: true })
+    setTimeout(() => observer.disconnect(), 60_000)
   },
 })

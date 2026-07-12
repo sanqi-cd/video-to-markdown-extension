@@ -1,0 +1,164 @@
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  color: #1a1a2e;
+  background: #f8f9fa;
+  line-height: 1.5;
+}
+
+/* ── App Container ── */
+.app-container {
+  padding: 16px;
+  max-width: 480px;
+}
+
+.app-container h1 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #0f0f1a;
+  border-bottom: 2px solid #4f46e5;
+  padding-bottom: 8px;
+}
+
+.app-container h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* ── Forms ── */
+.settings-form label,
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4b5563;
+  margin-bottom: 4px;
+  margin-top: 12px;
+}
+
+.settings-form input,
+input[type="text"],
+input[type="url"],
+input[type="password"],
+select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+/* ── Buttons ── */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #fff;
+  background: #4f46e5;
+}
+
+button:hover:not(:disabled) { background: #4338ca; }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.danger { background: #dc2626; }
+button.danger:hover:not(:disabled) { background: #b91c1c; }
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+/* ── Status Box ── */
+.status-box {
+  text-align: center;
+  padding: 24px 16px;
+  color: #6b7280;
+}
+
+.status-box p { margin-bottom: 12px; }
+.status-box .hint { font-size: 12px; color: #9ca3af; }
+
+/* ── Error ── */
+.error, [role="alert"] {
+  color: #dc2626;
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 8px;
+  background: #fef2f2;
+  border-radius: 4px;
+}
+
+/* ── Progress ── */
+progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+progress::-webkit-progress-bar { background: #e5e7eb; border-radius: 4px; }
+progress::-webkit-progress-value { background: #4f46e5; border-radius: 4px; }
+
+/* ── Fieldset ── */
+fieldset {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-top: 12px;
+}
+
+legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4b5563;
+  padding: 0 4px;
+}
+
+fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 16px;
+  margin-top: 0;
+  font-weight: 400;
+}
+
+/* ── Checkbox ── */
+input[type="checkbox"] { accent-color: #4f46e5; }
+input[type="radio"] { accent-color: #4f46e5; }
+
+/* ── Pre / Markdown Preview ── */
+pre {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 12px 0;
+}
