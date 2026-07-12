@@ -79,15 +79,19 @@ export class BilibiliAdapter implements SubtitleAdapter {
     if (!response.ok) {
       throw new AppError(
         'SUBTITLE_EXTRACTION_FAILED',
-        `字幕请求失败 (${response.status})`,
+        `字幕请求失败 (HTTP ${response.status})`,
       )
     }
 
+    const rawText = await response.text().catch(() => '')
     let body: unknown
     try {
-      body = await response.json()
+      body = JSON.parse(rawText)
     } catch {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据格式异常')
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕数据格式异常，服务器返回了非 JSON 数据。响应预览: ${rawText.slice(0, 200)}`,
+      )
     }
 
     const parsed = BilibiliSubtitleBodySchema.safeParse(body)

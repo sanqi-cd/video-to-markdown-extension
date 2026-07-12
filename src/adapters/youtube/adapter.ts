@@ -47,35 +47,55 @@ export class YouTubeAdapter implements SubtitleAdapter {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '未找到指定的字幕轨道')
     }
 
-    const url = new URL(trackInfo.baseUrl)
-    if (url.protocol !== 'https:') {
+    // Validate HTTPS
+    const parsedUrl = new URL(trackInfo.baseUrl)
+    if (parsedUrl.protocol !== 'https:') {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕地址必须使用 HTTPS')
     }
 
-    // Append fmt=json3 to get JSON3 format
-    const fetchUrl = `${trackInfo.baseUrl}&fmt=json3`
+    // Ensure fmt=json3 is set
+    const baseUrl = trackInfo.baseUrl
+    const sep = baseUrl.includes('?') ? '&' : '?'
+    const fetchUrl = `${baseUrl}${sep}fmt=json3`
 
     let response: Response
     try {
       response = await this.fetchImpl(fetchUrl)
-    } catch {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据获取失败')
+    } catch (e) {
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕数据获取失败: ${e instanceof Error ? e.message : '网络错误'}`,
+      )
     }
 
     if (!response.ok) {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', `字幕请求失败 (${response.status})`)
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕请求失败 (HTTP ${response.status})`,
+      )
     }
 
+    // Read as text first, then try JSON
+    const rawText = await response.text().catch(() => '')
     let body: unknown
     try {
-      body = await response.json()
+      body = JSON.parse(rawText)
     } catch {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据格式异常')
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕数据格式异常，服务器返回了非 JSON 数据。响应预览: ${rawText.slice(0, 200)}`,
+      )
     }
 
     const parsed = CaptionTrackSchema.safeParse(body)
     if (!parsed.success) {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据结构不符合预期')
+      const keys = typeof body === 'object' && body !== null
+        ? Object.keys(body as Record<string, unknown>).join(', ')
+        : typeof body
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕数据结构不符合预期。返回字段: ${keys || '(空)'}`,
+      )
     }
 
     return parsed.data.events.map((event, index) => ({

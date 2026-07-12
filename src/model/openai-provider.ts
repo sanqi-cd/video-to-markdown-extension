@@ -40,6 +40,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new AppError('TASK_CANCELLED', '任务已取消')
     }
 
+    // Create a timeout signal merged with the caller's signal
+    const timeoutMs = 30_000
+    const timeoutController = new AbortController()
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs)
+    const mergedSignal = signal
+      ? combineSignals(signal, timeoutController.signal)
+      : timeoutController.signal
+
     let response: Response
     try {
       response = await this.fetchImpl(
@@ -55,14 +63,20 @@ export class OpenAICompatibleProvider implements ModelProvider {
             messages,
             temperature: 0,
           }),
-          signal,
+          signal: mergedSignal,
         },
       )
     } catch (error) {
+      clearTimeout(timeoutId)
       if (error instanceof DOMException && error.name === 'AbortError') {
+        if (timeoutController.signal.aborted && !signal?.aborted) {
+          throw new AppError('NETWORK_FAILED', '请求超时（30 秒），请检查 Base URL 是否正确')
+        }
         throw new AppError('TASK_CANCELLED', '任务已取消')
       }
-      throw new AppError('NETWORK_FAILED', '网络请求失败')
+      throw new AppError('NETWORK_FAILED', '网络请求失败，请检查 Base URL 和网络连接')
+    } finally {
+      clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
@@ -75,12 +89,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     try {
       body = await response.json()
     } catch {
-      throw new AppError('MODEL_RESPONSE_INVALID', '模型返回格式异常')
+      throw new AppError('MODEL_RESPONSE_INVALID', '模型返回格式异常，请检查 Base URL 是否指向正确的 API 地址')
     }
 
     const content = extractContent(body)
     if (content === null) {
-      throw new AppError('MODEL_RESPONSE_INVALID', '模型返回数据不完整')
+      throw new AppError('MODEL_RESPONSE_INVALID', '模型返回数据不完整，请检查模型名称是否正确')
     }
 
     return { content }
@@ -103,6 +117,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
 interface ChoiceMessage {
   message?: { content?: string }
+}
+
+function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  a.addEventListener('abort', onAbort, { once: true })
+  b.addEventListener('abort', onAbort, { once: true })
+  if (a.aborted || b.aborted) controller.abort()
+  return controller.signal
 }
 
 function hasChoices(
