@@ -1,7 +1,13 @@
 import { defineConfig } from 'wxt'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  modules: ['@wxt-dev/module-react'],
+  vite: () => ({
+    plugins: [react()],
+    build: {
+      modulePreload: false,
+    },
+  }),
   manifest: {
     minimum_chrome_version: '114',
     name: 'Video to Markdown',
