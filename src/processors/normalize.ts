@@ -54,14 +54,15 @@ export function normalizeCues(cues: SubtitleCue[]): SubtitleCue[] {
   // Step 2: Remove empty cues
   const nonEmpty = cleaned.filter((cue) => cue.text.length > 0)
 
-  // Step 3: Remove exact duplicates (keep first occurrence)
-  const seen = new Set<string>()
-  const deduped = nonEmpty.filter((cue) => {
-    const key = cue.text
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  // Step 3: Remove only adjacent/overlapping duplicates. Repeated phrases much
+  // later in the video are legitimate content and must be preserved.
+  const deduped: SubtitleCue[] = []
+  for (const cue of nonEmpty) {
+    const previous = deduped[deduped.length - 1]
+    const isNearbyDuplicate = previous?.text === cue.text
+      && cue.startMs <= previous.endMs + 1_500
+    if (!isNearbyDuplicate) deduped.push(cue)
+  }
 
   if (deduped.length <= 1) return deduped
 
@@ -70,7 +71,10 @@ export function normalizeCues(cues: SubtitleCue[]): SubtitleCue[] {
   for (let i = 1; i < deduped.length; i += 1) {
     const prev = result[result.length - 1]!
     const curr = deduped[i]!
-    const dedupedText = removeWordOverlap(prev.text, curr.text)
+    const isRollingWindow = curr.startMs <= prev.endMs + 1_500
+    const dedupedText = isRollingWindow
+      ? removeWordOverlap(prev.text, curr.text)
+      : curr.text
     if (dedupedText.length > 0) {
       result.push({ ...curr, text: dedupedText })
     }

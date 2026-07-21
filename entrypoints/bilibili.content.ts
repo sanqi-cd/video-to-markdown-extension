@@ -1,4 +1,5 @@
 import { BilibiliContextSchema } from '../src/adapters/bilibili/schemas'
+import { PAGE_BRIDGE_VERSION } from '../src/adapters/shared/page-bridge'
 
 export default defineContentScript({
   matches: ['https://www.bilibili.com/*', 'https://bilibili.com/*'],
@@ -24,9 +25,18 @@ export default defineContentScript({
       ) {
         const ctx = readContext()
         if (ctx) {
-          return Promise.resolve({ success: true, data: ctx })
+          return Promise.resolve({
+            success: true,
+            bridgeVersion: PAGE_BRIDGE_VERSION,
+            platform: 'bilibili',
+            data: ctx,
+          })
         }
-        return Promise.resolve({ success: false, error: 'NO_VIDEO_CONTEXT' })
+        return Promise.resolve({
+          success: false,
+          bridgeVersion: PAGE_BRIDGE_VERSION,
+          code: 'CONTEXT_NOT_READY',
+        })
       }
     })
   },

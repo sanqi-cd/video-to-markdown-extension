@@ -6,12 +6,19 @@ export type RetryPolicy = {
   maxDelayMs: number
 }
 
+export type RetryNotice = {
+  attempt: number
+  nextAttempt: number
+  delayMs: number
+}
+
 const RETRYABLE_CODES = new Set(['MODEL_RATE_LIMITED', 'NETWORK_FAILED'])
 
 export async function withRetry<T>(
   operation: () => Promise<T>,
   policy: RetryPolicy,
   sleep: (ms: number) => Promise<void>,
+  onRetry?: (notice: RetryNotice) => void,
 ): Promise<T> {
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
     try {
@@ -26,6 +33,7 @@ export async function withRetry<T>(
         policy.maxDelayMs,
         policy.baseDelayMs * 2 ** (attempt - 1),
       )
+      onRetry?.({ attempt, nextAttempt: attempt + 1, delayMs: delay })
       await sleep(delay)
     }
   }

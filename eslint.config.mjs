@@ -10,6 +10,6 @@ export default tseslint.config(
     rules: reactHooks.configs.recommended.rules,
   },
   {
-    ignores: ['.output/', '.wxt/', 'node_modules/'],
+    ignores: ['.output/', '.wxt/', '.worktrees/', '.pnpm-store/', 'node_modules/'],
   },
 )

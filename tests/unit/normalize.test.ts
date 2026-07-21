@@ -53,6 +53,15 @@ describe('normalizeCues', () => {
     expect(result[1]!.id).toBe('3')
   })
 
+  it('preserves a repeated phrase later in the video', () => {
+    const cues = [
+      cue({ id: '1', startMs: 0, endMs: 1000, text: 'Welcome back' }),
+      cue({ id: '2', startMs: 60_000, endMs: 61_000, text: 'Welcome back' }),
+    ]
+
+    expect(normalizeCues(cues)).toHaveLength(2)
+  })
+
   it('removes rolling-caption overlap without losing new words', () => {
     const cues = [
       cue({ id: '1', startMs: 0, endMs: 1000, text: 'Welcome to the show' }),

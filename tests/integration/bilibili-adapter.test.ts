@@ -96,6 +96,19 @@ describe('BilibiliAdapter', () => {
     })
   })
 
+  it('rejects a valid subtitle body without any text cues', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString()
+      return new Response(JSON.stringify(
+        url.includes('/x/player/v2') ? subtitlesFixture : { body: [] },
+      ), { status: 200 })
+    })
+    const adapter = new BilibiliAdapter(bridgePayload, fetchImpl)
+    const tracks = await adapter.getSubtitleTracks()
+
+    await expect(adapter.getCues(tracks[0]!)).rejects.toThrow('没有可提取的文字内容')
+  })
+
   it('throws NO_SUBTITLE when API returns empty list', async () => {
     const emptyFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ code: 0, data: {} }), {
@@ -138,5 +151,24 @@ describe('BilibiliAdapter', () => {
     await expect(adapter.getCues(tracks[0]!)).rejects.toMatchObject({
       code: 'SUBTITLE_EXTRACTION_FAILED',
     })
+  })
+
+  it('accepts protocol-relative subtitle URLs from the Bilibili CDN', async () => {
+    const relativeSubs = structuredClone(subtitlesFixture)
+    relativeSubs.data.subtitle!.subtitles[0]!.subtitle_url =
+      '//i0.hdslb.com/bfs/ai_subtitle/12345.json'
+    const fetchImpl = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString()
+      return new Response(JSON.stringify(
+        url.includes('/x/player/v2') ? relativeSubs : bodyFixture,
+      ), { status: 200 })
+    })
+    const adapter = new BilibiliAdapter(bridgePayload, fetchImpl)
+    const tracks = await adapter.getSubtitleTracks()
+
+    await expect(adapter.getCues(tracks[0]!)).resolves.toHaveLength(3)
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      'https://i0.hdslb.com/bfs/ai_subtitle/12345.json',
+    )
   })
 })

@@ -40,8 +40,7 @@ type RouterDeps = {
   configStore: ModelConfigStore
   isExtensionOrigin: (sender: Sender) => boolean
   createProvider?: (config: NonNullable<Awaited<ReturnType<ModelConfigStore['get']>>>) => ModelProvider
-  getActiveRequestIds?: () => Set<string>
-  cancelRequest?: (id: string) => void
+  activeRequests?: Map<string, AbortController>
 }
 
 export function createMessageRouter(deps: RouterDeps) {
@@ -79,14 +78,21 @@ export function createMessageRouter(deps: RouterDeps) {
         if (!config) throw new AppError('INVALID_MODEL_CONFIG', '请先配置模型')
         if (!deps.createProvider) throw new AppError('INVALID_MODEL_CONFIG', '模型服务未就绪')
         const provider = deps.createProvider(config)
-        const response = await provider.complete(
-          { messages: message.messages, responseFormat: 'json' },
-        )
-        return { content: response.content }
+        const controller = new AbortController()
+        deps.activeRequests?.set(message.requestId, controller)
+        try {
+          const response = await provider.complete(
+            { messages: message.messages, responseFormat: 'json' },
+            controller.signal,
+          )
+          return { content: response.content }
+        } finally {
+          deps.activeRequests?.delete(message.requestId)
+        }
       }
 
       case 'MODEL_CANCEL_REQUEST':
-        deps.cancelRequest?.(message.requestId)
+        deps.activeRequests?.get(message.requestId)?.abort()
         return { cancelled: true }
 
       default:

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { renderMarkdown, timestampUrl, sanitizeFilename } from '../../src/markdown/render-markdown'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  downloadMarkdown,
+  renderMarkdown,
+  timestampUrl,
+  sanitizeFilename,
+} from '../../src/markdown/render-markdown'
 import type { ProcessedDocument } from '../../src/core/orchestrator'
 import type { TranslatedParagraph } from '../../src/processors/high-fidelity'
 
@@ -13,6 +18,7 @@ const highFidelityDoc: ProcessedDocument = {
     durationMs: 204000,
   },
   mode: 'high-fidelity',
+  generatedAt: new Date('2026-07-12T12:00:00+08:00').getTime(),
   content: [
     {
       id: 'p1',
@@ -51,13 +57,52 @@ describe('sanitizeFilename', () => {
   it('trims whitespace and periods', () => {
     expect(sanitizeFilename('  标题...  ')).toBe('标题')
   })
+
+  it('uses a stable fallback when the title contains only illegal characters', () => {
+    expect(sanitizeFilename('  <>:"/\\|?*...  ')).toBe('video-to-markdown')
+  })
+})
+
+describe('downloadMarkdown', () => {
+  it('rejects when Chrome reports a download error and always revokes the object URL', async () => {
+    const originalDownload = chrome.downloads.download
+    const lastErrorDescriptor = Object.getOwnPropertyDescriptor(chrome.runtime, 'lastError')
+    const createObjectURL = vi.fn().mockReturnValue('blob:test-markdown')
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+    const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    Object.defineProperty(chrome.runtime, 'lastError', {
+      configurable: true,
+      value: { message: 'download denied' },
+    })
+    chrome.downloads.download = vi.fn((_options, callback) => {
+      callback?.(0)
+    }) as unknown as typeof chrome.downloads.download
+
+    try {
+      await expect(downloadMarkdown('标题', '# 正文')).rejects.toThrow(
+        '下载失败：download denied',
+      )
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:test-markdown')
+    } finally {
+      chrome.downloads.download = originalDownload
+      if (lastErrorDescriptor) Object.defineProperty(chrome.runtime, 'lastError', lastErrorDescriptor)
+      else delete (chrome.runtime as unknown as Record<string, unknown>).lastError
+      if (originalCreateObjectURL) Object.defineProperty(URL, 'createObjectURL', originalCreateObjectURL)
+      else delete (URL as Partial<typeof URL>).createObjectURL
+      if (originalRevokeObjectURL) Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectURL)
+      else delete (URL as Partial<typeof URL>).revokeObjectURL
+    }
+  })
 })
 
 describe('renderMarkdown', () => {
   it('renders the video title as H1', () => {
     const md = renderMarkdown(highFidelityDoc, {
       includeTimestamps: false,
-      generatedAt: new Date('2026-07-12T12:00:00+08:00'),
     })
     expect(md).toContain('# AI 智能体如何工作')
   })
@@ -65,7 +110,6 @@ describe('renderMarkdown', () => {
   it('includes metadata block with source and author', () => {
     const md = renderMarkdown(highFidelityDoc, {
       includeTimestamps: false,
-      generatedAt: new Date('2026-07-12T12:00:00+08:00'),
     })
     expect(md).toContain('> 来源：YouTube')
     expect(md).toContain('> 作者：Tech Channel')
@@ -81,7 +125,6 @@ describe('renderMarkdown', () => {
     }
     const md = renderMarkdown(doc, {
       includeTimestamps: false,
-      generatedAt: new Date('2026-07-12T12:00:00+08:00'),
     })
     expect(md).not.toContain('> 作者')
   })
@@ -89,7 +132,6 @@ describe('renderMarkdown', () => {
   it('renders YouTube timestamps when enabled', () => {
     const md = renderMarkdown(highFidelityDoc, {
       includeTimestamps: true,
-      generatedAt: new Date('2026-07-12T12:00:00+08:00'),
     })
     expect(md).toContain('[00:03:24](https://www.youtube.com/watch?v=video123&t=204s)')
     expect(md).not.toContain('How AI agents work')
@@ -98,7 +140,6 @@ describe('renderMarkdown', () => {
   it('omits timestamp lines when disabled', () => {
     const md = renderMarkdown(highFidelityDoc, {
       includeTimestamps: false,
-      generatedAt: new Date('2026-07-12T12:00:00+08:00'),
     })
     expect(md).not.toContain('[00:03:24]')
   })
@@ -106,5 +147,69 @@ describe('renderMarkdown', () => {
   it('converts milliseconds to mm:ss or hh:mm:ss format', () => {
     const url = timestampUrl('youtube', 'v123', 3661000) // 1h 1min 1s
     expect(url).toContain('t=3661s')
+  })
+
+  it('renders source timestamps for refined chapters when enabled', () => {
+    const document: ProcessedDocument = {
+      metadata: highFidelityDoc.metadata,
+      mode: 'refined',
+      generatedAt: highFidelityDoc.generatedAt,
+      paragraphTimestamps: { p1: 65_000 },
+      content: {
+        overview: '概览',
+        coreIdeas: [],
+        chapters: [{ title: '章节', body: '内容', sourceParagraphIds: ['p1'] }],
+        importantFacts: [],
+        conclusion: '',
+      },
+    }
+    const markdown = renderMarkdown(document, {
+      includeTimestamps: true,
+    })
+
+    expect(markdown).toContain('[来源 00:01:05](https://www.youtube.com/watch?v=video123&t=65s)')
+  })
+
+  it('uses the fixed document generation time across repeated renders', () => {
+    const first = renderMarkdown(highFidelityDoc, { includeTimestamps: false })
+    const second = renderMarkdown(highFidelityDoc, { includeTimestamps: false })
+
+    expect(first).toBe(second)
+    expect(first).toContain('> 生成时间：2026-07-12T12:00:00+08:00')
+  })
+
+  it('marks a partial export with its incomplete chunk count', () => {
+    const markdown = renderMarkdown({
+      ...highFidelityDoc,
+      partial: { incompleteChunkCount: 2 },
+    }, { includeTimestamps: false })
+
+    expect(markdown).toContain('> 结果状态：不完整结果')
+    expect(markdown).toContain('> 未完成分块：2')
+  })
+
+  it('renders English metadata and refined section headings for English output', () => {
+    const document: ProcessedDocument = {
+      metadata: highFidelityDoc.metadata,
+      mode: 'refined',
+      outputLanguage: 'en',
+      generatedAt: highFidelityDoc.generatedAt,
+      content: {
+        overview: 'An overview.',
+        coreIdeas: ['A core idea.'],
+        chapters: [],
+        importantFacts: [],
+        conclusion: 'A conclusion.',
+      },
+    }
+
+    const markdown = renderMarkdown(document, { includeTimestamps: false })
+
+    expect(markdown).toContain('> Source: YouTube')
+    expect(markdown).toContain('> Output language: English')
+    expect(markdown).toContain('## Overview')
+    expect(markdown).toContain('## Core Ideas')
+    expect(markdown).toContain('## Conclusion and Takeaways')
+    expect(markdown).not.toContain('## 内容概览')
   })
 })

@@ -21,15 +21,28 @@ if (!globalThis.chrome) {
           for (const k of keys) storage.delete(k)
           return Promise.resolve()
         },
+        setAccessLevel: () => Promise.resolve(),
       },
     },
     tabs: {
       query: () => Promise.reject(new Error('chrome.tabs not available in test')),
       sendMessage: () => Promise.reject(new Error('chrome.tabs not available in test')),
+      reload: () => Promise.resolve(),
+      onActivated: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      onUpdated: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
     },
     runtime: {
       getURL: (path: string) => `chrome-extension://test/${path}`,
       sendMessage: () => Promise.reject(new Error('chrome.runtime not available in test')),
+    },
+    permissions: {
+      request: () => Promise.resolve(true),
     },
     sidePanel: {
       setPanelBehavior: () => Promise.resolve(),
@@ -39,4 +52,3 @@ if (!globalThis.chrome) {
     },
   }
 }
-

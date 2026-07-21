@@ -22,15 +22,27 @@ function createMemoryStore(initial: Record<string, unknown> = {}): StorageArea {
 }
 
 const validConfig: ModelConfig = {
+  version: 2,
+  providerId: 'openai',
   apiKey: 'sk-test-key',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o',
   contextWindow: 128000,
+  streamMode: 'auto',
 }
 
 describe('normalizeBaseUrl', () => {
   it('normalizes an HTTPS base URL by stripping trailing slash', () => {
     expect(normalizeBaseUrl('https://api.example.com/v1/')).toBe(
+      'https://api.example.com/v1',
+    )
+  })
+
+  it('strips a pasted chat completions endpoint and duplicate v1 suffixes', () => {
+    expect(normalizeBaseUrl('https://api.example.com/v1/chat/completions')).toBe(
+      'https://api.example.com/v1',
+    )
+    expect(normalizeBaseUrl('https://api.example.com/v1/v1/')).toBe(
       'https://api.example.com/v1',
     )
   })
@@ -66,6 +78,66 @@ describe('ModelConfigStore', () => {
     const store = createConfigStore(createMemoryStore())
     const result = await store.get()
     expect(result).toBeNull()
+  })
+
+  it('returns null for a corrupted stored config', async () => {
+    const store = createConfigStore(createMemoryStore({
+      modelConfig: { apiKey: 'sk-test', baseUrl: 'javascript:alert(1)', model: 'x' },
+    }))
+
+    await expect(store.get()).resolves.toBeNull()
+  })
+
+  it('does not reinterpret an invalid declared V2 config as legacy', async () => {
+    const store = createConfigStore(createMemoryStore({
+      modelConfig: { ...validConfig, providerId: 'unknown-provider' },
+    }))
+    await expect(store.get()).resolves.toBeNull()
+  })
+
+  it('migrates and re-saves V1 config without changing the API key', async () => {
+    const storage = createMemoryStore({
+      modelConfig: {
+        apiKey: 'sk-legacy-secret',
+        baseUrl: 'https://api.openai.com/v1/',
+        model: 'gpt-4o-mini',
+        contextWindow: 128000,
+      },
+    })
+    const store = createConfigStore(storage)
+
+    await expect(store.get()).resolves.toEqual({
+      version: 2,
+      providerId: 'openai',
+      apiKey: 'sk-legacy-secret',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini',
+      contextWindow: 128000,
+      streamMode: 'auto',
+    })
+    const persisted = await storage.get(['modelConfig'])
+    expect(persisted.modelConfig).toMatchObject({
+      version: 2,
+      apiKey: 'sk-legacy-secret',
+      providerId: 'openai',
+    })
+  })
+
+  it('normalizes values before persisting', async () => {
+    const store = createConfigStore(createMemoryStore())
+    await store.set({
+      ...validConfig,
+      apiKey: '  sk-test-key  ',
+      baseUrl: 'https://api.example.com/v1/',
+      model: '  model-name  ',
+    })
+
+    await expect(store.get()).resolves.toEqual({
+      ...validConfig,
+      apiKey: 'sk-test-key',
+      baseUrl: 'https://api.example.com/v1',
+      model: 'model-name',
+    })
   })
 
   it('rejects an empty API key', async () => {

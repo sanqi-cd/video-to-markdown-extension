@@ -35,8 +35,8 @@ export type YouTubePlayerResponse = z.infer<typeof YouTubeBridgePayloadSchema>
  */
 export const CaptionEventSchema = z.object({
   tStartMs: z.number(),
-  dDurationMs: z.number(),
-  segs: z.array(z.object({ utf8: z.string() })),
+  dDurationMs: z.number().optional().default(0),
+  segs: z.array(z.object({ utf8: z.string() })).optional().default([]),
 })
 
 export const CaptionTrackSchema = z.object({

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+export const PAGE_BRIDGE_VERSION = 1
+
 export const BridgeEventSchema = z.object({
   videoId: z.string().min(1),
   metadata: z.object({
@@ -23,4 +25,11 @@ export type BridgePayload = z.infer<typeof BridgeEventSchema>
 export const BRIDGE_EVENT_NAMES = {
   youtube: 'video-to-md:youtube-context',
   bilibili: 'video-to-md:bilibili-context',
+} as const
+
+export const YOUTUBE_CAPTION_BRIDGE = {
+  requestEvent: 'video-to-md:youtube-caption-request',
+  responseEvent: 'video-to-md:youtube-caption-response',
+  requestAttribute: 'data-v2md-youtube-caption-request',
+  responseAttribute: 'data-v2md-youtube-caption-response',
 } as const

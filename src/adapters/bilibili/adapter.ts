@@ -4,6 +4,7 @@ import type { BilibiliContextPayload } from './schemas'
 import type { SubtitleAdapter, SubtitleTrack, SubtitleCue, VideoMetadata } from '../../core/contracts'
 
 const PLAYER_API = 'https://api.bilibili.com/x/player/v2'
+const ALLOWED_SUBTITLE_HOST_SUFFIX = '.hdslb.com'
 
 type TrackInfo = {
   id: number
@@ -64,14 +65,17 @@ export class BilibiliAdapter implements SubtitleAdapter {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '未找到指定的字幕轨道')
     }
 
-    const url = new URL(trackInfo.subtitle_url)
-    if (url.protocol !== 'https:') {
-      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕地址必须使用 HTTPS')
+    const url = new URL(trackInfo.subtitle_url, 'https://www.bilibili.com')
+    if (
+      url.protocol !== 'https:' ||
+      !(url.hostname === 'hdslb.com' || url.hostname.endsWith(ALLOWED_SUBTITLE_HOST_SUFFIX))
+    ) {
+      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕地址不在允许的 B 站域名内')
     }
 
     let response: Response
     try {
-      response = await this.fetchImpl(trackInfo.subtitle_url)
+      response = await this.fetchImpl(url.toString())
     } catch {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据获取失败')
     }
@@ -99,12 +103,21 @@ export class BilibiliAdapter implements SubtitleAdapter {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕数据结构不符合预期')
     }
 
-    return parsed.data.body.map((cue, index) => ({
-      id: `bili-${index}`,
-      startMs: Math.round(cue.from * 1000),
-      endMs: Math.round(cue.to * 1000),
-      text: cue.content,
-    }))
+    const cues = parsed.data.body
+      .map((cue, index) => ({
+        id: `bili-${index}`,
+        startMs: Math.round(cue.from * 1000),
+        endMs: Math.round(cue.to * 1000),
+        text: cue.content,
+      }))
+      .filter((cue) => cue.text.trim().length > 0)
+    if (cues.length === 0) {
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        'B 站字幕轨道没有可提取的文字内容，请切换字幕或刷新页面后重试',
+      )
+    }
+    return cues
   }
 
   private async fetchTrackList(): Promise<TrackInfo[]> {
@@ -136,6 +149,12 @@ export class BilibiliAdapter implements SubtitleAdapter {
     const parsed = BilibiliSubtitleListSchema.safeParse(body)
     if (!parsed.success) {
       throw new AppError('SUBTITLE_EXTRACTION_FAILED', '字幕列表结构不符合预期')
+    }
+    if (parsed.data.code !== 0) {
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        `字幕列表接口返回错误 (${parsed.data.code})`,
+      )
     }
 
     this.trackList = parsed.data.data.subtitle?.subtitles ?? []

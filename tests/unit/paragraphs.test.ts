@@ -88,4 +88,17 @@ describe('buildParagraphs', () => {
     expect(result).toHaveLength(1)
     expect(result[0]!.text).toBe('这是第一句话 继续。')
   })
+
+  it('limits paragraphs when subtitles have no punctuation', () => {
+    const cues = Array.from({ length: 8 }, (_, index) => cue({
+      id: String(index),
+      startMs: index * 500,
+      endMs: index * 500 + 400,
+      text: 'a'.repeat(100),
+    }))
+    const result = buildParagraphs(cues)
+
+    expect(result.length).toBeGreaterThan(1)
+    expect(result.every((paragraph) => paragraph.text.length <= 600)).toBe(true)
+  })
 })

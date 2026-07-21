@@ -43,6 +43,17 @@ export type ModelResponse = {
   content: string
 }
 
+export type ModelActivity =
+  | { type: 'connected' }
+  | { type: 'delta'; text: string; receivedChars: number }
+
+export type ModelCallContext = {
+  taskId: string
+  chunkIndex: number
+  onActivity?: (activity: ModelActivity) => void
+  onValidatedContent?: (content: unknown) => void
+}
+
 export interface SubtitleAdapter {
   supports(url: URL): boolean
   getVideoMetadata(): Promise<VideoMetadata>
@@ -52,5 +63,9 @@ export interface SubtitleAdapter {
 
 export interface ModelProvider {
   testConnection(signal?: AbortSignal): Promise<void>
-  complete(request: ModelRequest, signal?: AbortSignal): Promise<ModelResponse>
+  complete(
+    request: ModelRequest,
+    signal?: AbortSignal,
+    context?: ModelCallContext,
+  ): Promise<ModelResponse>
 }

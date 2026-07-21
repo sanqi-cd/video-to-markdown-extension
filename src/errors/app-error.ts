@@ -1,5 +1,9 @@
 export type ErrorCode =
   | 'UNSUPPORTED_PAGE'
+  | 'ACTIVE_TAB_UNAVAILABLE'
+  | 'CONTENT_SCRIPT_UNAVAILABLE'
+  | 'PAGE_CONTEXT_INVALID'
+  | 'TAB_RELOAD_TIMEOUT'
   | 'NO_SUBTITLE'
   | 'SUBTITLE_EXTRACTION_FAILED'
   | 'INVALID_MODEL_CONFIG'
@@ -13,6 +17,27 @@ export type ErrorCode =
 export type PublicAppError = {
   code: ErrorCode
   message: string
+}
+
+const ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
+  'UNSUPPORTED_PAGE',
+  'ACTIVE_TAB_UNAVAILABLE',
+  'CONTENT_SCRIPT_UNAVAILABLE',
+  'PAGE_CONTEXT_INVALID',
+  'TAB_RELOAD_TIMEOUT',
+  'NO_SUBTITLE',
+  'SUBTITLE_EXTRACTION_FAILED',
+  'INVALID_MODEL_CONFIG',
+  'MODEL_AUTH_FAILED',
+  'MODEL_RATE_LIMITED',
+  'MODEL_CONTEXT_EXCEEDED',
+  'MODEL_RESPONSE_INVALID',
+  'NETWORK_FAILED',
+  'TASK_CANCELLED',
+])
+
+export function isErrorCode(value: unknown): value is ErrorCode {
+  return typeof value === 'string' && ERROR_CODES.has(value as ErrorCode)
 }
 
 type AppErrorOptions = {
