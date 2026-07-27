@@ -1,4 +1,4 @@
-import { BilibiliContextSchema } from '../src/adapters/bilibili/schemas'
+import { parseBilibiliMainWorldContext } from '../src/adapters/bilibili/main-world-parser'
 
 export default defineContentScript({
   matches: ['https://www.bilibili.com/*', 'https://bilibili.com/*'],
@@ -58,7 +58,7 @@ export default defineContentScript({
       const contextKey = `${videoData.bvid}:${videoData.cid}`
       if (staleContextKey === contextKey) return
 
-      const parsed = BilibiliContextSchema.safeParse({
+      const parsed = parseBilibiliMainWorldContext({
         bvid: videoData.bvid,
         aid: videoData.aid ?? 0,
         cid: videoData.cid,
@@ -66,14 +66,14 @@ export default defineContentScript({
         author: upData?.name,
         durationMs: videoData.duration ? videoData.duration * 1000 : undefined,
       })
-      if (!parsed.success) {
+      if (!parsed) {
         clearContext()
         return
       }
 
       document.documentElement.setAttribute(
         'data-v2md-bilibili',
-        JSON.stringify(parsed.data),
+        JSON.stringify(parsed),
       )
       lastContextKey = contextKey
       staleContextKey = null

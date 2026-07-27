@@ -1,8 +1,8 @@
 import {
-  BridgeEventSchema,
   PAGE_BRIDGE_VERSION,
   YOUTUBE_CAPTION_BRIDGE,
 } from '../src/adapters/shared/page-bridge'
+import { BridgeEventSchema } from '../src/adapters/shared/page-bridge-schema'
 
 export default defineContentScript({
   matches: ['https://www.youtube.com/*'],

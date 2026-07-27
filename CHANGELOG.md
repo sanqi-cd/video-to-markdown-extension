@@ -15,6 +15,11 @@
 - YouTube 与哔哩哔哩已有字幕适配。
 - 模型配置测试和按来源申请可选 Host Permission。
 
+### Fixed
+
+- 实时预览新增内容时保持阅读位置稳定，由用户主动选择是否跟随最新内容。
+- 移除页面 MAIN world 脚本中的动态代码依赖，兼容 YouTube Trusted Types 安全策略。
+
 ### Security
 
 - API Key 访问范围限制为扩展可信上下文。
