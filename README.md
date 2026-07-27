@@ -54,7 +54,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/sanqi-cd/video-to-markdown-extension/releases) 下载当前版本的 Chrome ZIP，解压后在 `chrome://extensions` 开启开发者模式并选择“加载已解压的扩展程序”。
+从 [GitHub Releases](https://github.com/sanqi-cd/video-to-markdown-extension/releases) 下载当前版本的 Chrome ZIP，解压后在 `chrome://extensions` 开启开发者模式并选择“加载未打包的扩展程序”。
 
 完整步骤、模型配置和常见问题见 [安装与使用指南](./docs/安装使用指南.md)。
 

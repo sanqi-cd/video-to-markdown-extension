@@ -16,11 +16,6 @@ export interface BridgePayload {
   }>
 }
 
-export const BRIDGE_EVENT_NAMES = {
-  youtube: 'video-to-md:youtube-context',
-  bilibili: 'video-to-md:bilibili-context',
-} as const
-
 export const YOUTUBE_CAPTION_BRIDGE = {
   requestEvent: 'video-to-md:youtube-caption-request',
   responseEvent: 'video-to-md:youtube-caption-response',
