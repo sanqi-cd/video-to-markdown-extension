@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/sanqi-cd/video-to-markdown-extension/security/advisories/new
+    about: 请通过私下漏洞报告提交安全问题，不要在公开 Issue 中泄露敏感信息。

@@ -5,13 +5,13 @@
 ## 开发环境
 
 - Node.js 22+
-- pnpm 9+
+- pnpm 11.5.3+
 - Chrome 114+
 
 ## 设置
 
 ```bash
-git clone https://github.com/hardycha/video-to-markdown-extension.git
+git clone https://github.com/sanqi-cd/video-to-markdown-extension.git
 cd video-to-markdown-extension
 pnpm install
 ```
@@ -40,10 +40,12 @@ pnpm install
 
 ```bash
 pnpm test              # 单元测试与集成测试
-pnpm playwright test   # 端到端测试（需要先 pnpm build）
+pnpm test:coverage     # 测试覆盖率与门槛检查
+pnpm build             # 生产构建
+pnpm test:e2e          # 端到端测试
 ```
 
-目标覆盖率：80%+
+覆盖率门槛：语句、函数和行 80%，分支 75%。
 
 ## Issue 与 PR
 

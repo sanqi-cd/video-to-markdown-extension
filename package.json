@@ -1,7 +1,29 @@
 {
   "name": "video-to-markdown-extension",
   "version": "0.2.0",
+  "description": "Convert existing YouTube and Bilibili subtitles into Chinese or English Markdown.",
   "private": true,
+  "license": "MIT",
+  "homepage": "https://github.com/sanqi-cd/video-to-markdown-extension#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanqi-cd/video-to-markdown-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanqi-cd/video-to-markdown-extension/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "youtube",
+    "bilibili",
+    "subtitles",
+    "markdown",
+    "ai"
+  ],
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11.5.3"
+  },
   "type": "module",
   "packageManager": "pnpm@11.5.3",
   "scripts": {
@@ -12,6 +34,7 @@
     "typecheck": "tsc --noEmit && pnpm typecheck:e2e",
     "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "postinstall": "wxt prepare"
   },
@@ -31,14 +54,15 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/coverage-v8": "^4.1.10",
     "@wxt-dev/module-react": "^1.2.2",
-    "eslint": "^10.7.0",
+    "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.5",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10",
-    "wxt": "^0.20.27"
+    "wxt": "^0.21.1"
   }
 }

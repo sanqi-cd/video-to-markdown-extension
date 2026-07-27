@@ -10,6 +10,7 @@ web-ext.config.ts
 .DS_Store
 .superpowers/
 .worktrees/
+.pnpm-store/
 playwright-report/
 test-results/
 *.log

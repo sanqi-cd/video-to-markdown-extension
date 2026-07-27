@@ -11,7 +11,7 @@ export default defineConfig({
   manifest: {
     minimum_chrome_version: '114',
     name: 'Video to Markdown',
-    description: 'Convert existing video subtitles into Chinese Markdown.',
+    description: 'Convert existing YouTube and Bilibili subtitles into Chinese or English Markdown.',
     permissions: ['sidePanel', 'storage', 'downloads'],
     host_permissions: [
       'https://www.youtube.com/*',
@@ -20,7 +20,19 @@ export default defineConfig({
       'https://*.hdslb.com/*',
     ],
     optional_host_permissions: ['https://*/*'],
-    action: { default_title: 'Open Video to Markdown' },
+    icons: {
+      16: 'icon/16.png',
+      32: 'icon/32.png',
+      48: 'icon/48.png',
+      128: 'icon/128.png',
+    },
+    action: {
+      default_title: 'Open Video to Markdown',
+      default_icon: {
+        16: 'icon/16.png',
+        32: 'icon/32.png',
+      },
+    },
     side_panel: { default_path: 'sidepanel.html' },
   },
 })

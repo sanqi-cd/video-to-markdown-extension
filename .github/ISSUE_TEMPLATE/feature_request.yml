@@ -1,0 +1,30 @@
+name: Feature Request
+description: Suggest an improvement for Video to Markdown
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: 使用场景
+      description: 你在什么视频或工作流程中遇到了问题？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 期望方案
+      description: 你希望插件如何工作？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 可选方案
+      description: 你尝试过哪些替代方法？
+  - type: dropdown
+    attributes:
+      label: 平台
+      options:
+        - YouTube
+        - 哔哩哔哩
+        - 通用功能
+    validations:
+      required: true
