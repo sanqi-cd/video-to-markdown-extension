@@ -1,15 +1,22 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useAutoScroll } from '../../src/hooks/use-auto-scroll'
 
 function AutoScrollHarness({ version }: { version: number }) {
-  const { containerRef, handleScroll, isFollowing, resume } = useAutoScroll(version)
+  const {
+    containerRef,
+    handleScroll,
+    isFollowing,
+    pendingCount,
+    resume,
+  } = useAutoScroll(version, version)
   return (
     <div>
       <div ref={containerRef} onScroll={handleScroll} data-testid="viewport">
         内容版本 {version}
       </div>
       <span data-testid="following">{isFollowing ? 'following' : 'paused'}</span>
+      <span data-testid="pending">{pendingCount}</span>
       {!isFollowing && <button onClick={resume}>回到最新</button>}
     </div>
   )
@@ -56,13 +63,28 @@ describe('useAutoScroll', () => {
     expect(screen.queryByRole('button', { name: '回到最新' })).not.toBeInTheDocument()
   })
 
-  it('automatically follows new content while already at the bottom', () => {
+  it('keeps the viewport stable and records new content by default', async () => {
     const { rerender } = render(<AutoScrollHarness version={1} />)
     const viewport = screen.getByTestId('viewport')
     const scrollTo = configureViewport(viewport)
 
     rerender(<AutoScrollHarness version={2} />)
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(screen.getByTestId('following')).toHaveTextContent('paused')
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1'))
+  })
+
+  it('follows subsequent content only after the user explicitly resumes', () => {
+    const { rerender } = render(<AutoScrollHarness version={1} />)
+    const viewport = screen.getByTestId('viewport')
+    const scrollTo = configureViewport(viewport)
+
+    fireEvent.click(screen.getByRole('button', { name: '回到最新' }))
+    scrollTo.mockClear()
+    rerender(<AutoScrollHarness version={2} />)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'smooth' })
+    expect(screen.getByTestId('pending')).toHaveTextContent('0')
   })
 })

@@ -1096,12 +1096,25 @@ input[type="radio"] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
+  min-height: 38px;
   color: var(--color-text-secondary);
   font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-view__activity-placeholder {
+  visibility: hidden;
+}
+
+.progress-view__status-slot {
+  display: flex;
+  min-height: 48px;
 }
 
 .progress-view__waiting,
 .progress-view__retry {
+  width: 100%;
+  min-height: 48px;
   padding: var(--space-3);
   border-radius: var(--radius-sm);
   font-size: var(--font-sm);
@@ -1429,6 +1442,7 @@ pre {
   border-radius: var(--radius-md);
   overflow-anchor: none;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   scroll-behavior: auto;
 }
 
@@ -1448,6 +1462,7 @@ pre {
   position: absolute;
   right: var(--space-6);
   bottom: var(--space-6);
+  max-width: calc(100% - (2 * var(--space-6)));
   box-shadow: var(--shadow-raised);
 }
 

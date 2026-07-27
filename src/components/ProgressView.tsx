@@ -62,23 +62,32 @@ export function ProgressView({
         已完成 {completed} / {total}，{pct}%
       </p>
       <div className="progress-view__activity">
-        {modelConnected && <span>模型已连接</span>}
-        {currentChunkIndex !== null && total > 0 && (
+        {modelConnected
+          ? <span>模型已连接</span>
+          : <span className="progress-view__activity-placeholder" aria-hidden="true">模型已连接</span>}
+        {currentChunkIndex !== null && total > 0 ? (
           <span>正在处理第 {currentChunkIndex + 1} / {total} 部分</span>
+        ) : (
+          <span className="progress-view__activity-placeholder" aria-hidden="true">
+            正在处理第 00 / 00 部分
+          </span>
         )}
-        {receivedChars > 0 && <span>已接收 {receivedChars} 个字符</span>}
+        {receivedChars > 0
+          ? <span>已接收 {receivedChars} 个字符</span>
+          : <span className="progress-view__activity-placeholder" aria-hidden="true">已接收 0000 个字符</span>}
       </div>
-      {waitingForModel && (
-        <p className="progress-view__waiting" role="status">
-          正在等待模型响应
-          <span aria-hidden="true">，已等待 {formatElapsed(elapsed)}</span>
-        </p>
-      )}
-      {retry && (
-        <p className="progress-view__retry" role="status">
-          当前分块正在进行第 {retry.attempt} 次尝试
-        </p>
-      )}
+      <div className="progress-view__status-slot">
+        {retry ? (
+          <p className="progress-view__retry" role="status">
+            当前分块正在进行第 {retry.attempt} 次尝试
+          </p>
+        ) : waitingForModel ? (
+          <p className="progress-view__waiting" role="status">
+            正在等待模型响应
+            <span aria-hidden="true">，已等待 {formatElapsed(elapsed)}</span>
+          </p>
+        ) : null}
+      </div>
       {showAction && <Button variant="secondary" onClick={onCancel}>取消</Button>}
     </section>
   )

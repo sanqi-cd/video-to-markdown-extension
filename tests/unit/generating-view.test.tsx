@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GeneratingView } from '../../src/components/GeneratingView'
 import type { VideoMetadata } from '../../src/core/contracts'
@@ -104,7 +104,7 @@ describe('GeneratingView', () => {
     expect(screen.queryByLabelText('已生成内容', { exact: false })).not.toBeInTheDocument()
   })
 
-  it('does not restart preview scrolling for raw character updates', () => {
+  it('keeps the preview stable for raw updates and validated chunks', async () => {
     const initialSnapshot = runningSnapshot()
     const { rerender } = render(
       <GeneratingView snapshot={initialSnapshot} metadata={metadata} onCancel={() => {}} />,
@@ -152,7 +152,10 @@ describe('GeneratingView', () => {
       />,
     )
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
+    expect(scrollTo).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '新增 1 段 · 查看最新' })).toBeVisible()
+    })
   })
 
   it('shows validated refined analysis while the final note is still being generated', () => {

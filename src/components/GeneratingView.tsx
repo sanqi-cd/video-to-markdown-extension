@@ -57,7 +57,13 @@ export function GeneratingView({
   // Raw streamed characters are not rendered in the preview. Only follow when
   // validated, visible content changes so frequent token updates cannot restart scrolling.
   const contentVersion = visibleChunks.map((chunk) => chunk.id).join('|')
-  const { containerRef, handleScroll, isFollowing, resume } = useAutoScroll(contentVersion)
+  const {
+    containerRef,
+    handleScroll,
+    isFollowing,
+    pendingCount,
+    resume,
+  } = useAutoScroll(contentVersion, visibleChunks.length)
   const hasPreviewContent = document !== null || analysisPreview !== null
 
   return (
@@ -119,9 +125,9 @@ export function GeneratingView({
             )}
         </div>
 
-        {!isFollowing && (
+        {!isFollowing && pendingCount > 0 && (
           <Button className="live-preview-card__latest" variant="secondary" onClick={resume}>
-            回到最新
+            新增 {pendingCount} 段 · 查看最新
           </Button>
         )}
       </section>
