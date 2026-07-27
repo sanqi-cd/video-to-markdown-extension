@@ -35,6 +35,15 @@ const highFidelityDoc: ProcessedDocument = {
   ] as TranslatedParagraph[],
 }
 
+function generatedAtFromMarkdown(markdown: string): string {
+  const match = markdown.match(/^> 生成时间：(.+)$/m)
+  const generatedAt = match?.[1]
+  if (!generatedAt) {
+    throw new Error('Markdown metadata is missing the generation time')
+  }
+  return generatedAt
+}
+
 describe('timestampUrl', () => {
   it('generates YouTube timestamp URLs', () => {
     expect(timestampUrl('youtube', 'video123', 204000)).toBe(
@@ -115,7 +124,11 @@ describe('renderMarkdown', () => {
     expect(md).toContain('> 作者：Tech Channel')
     expect(md).toContain('> 视频：https://www.youtube.com/watch?v=video123')
     expect(md).toContain('> 处理模式：高保真')
-    expect(md).toContain('> 生成时间：2026-07-12T12:00:00+08:00')
+    const generatedAt = generatedAtFromMarkdown(md)
+    expect(generatedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/,
+    )
+    expect(new Date(generatedAt).getTime()).toBe(highFidelityDoc.generatedAt)
   })
 
   it('omits author line when author is missing', () => {
@@ -175,7 +188,9 @@ describe('renderMarkdown', () => {
     const second = renderMarkdown(highFidelityDoc, { includeTimestamps: false })
 
     expect(first).toBe(second)
-    expect(first).toContain('> 生成时间：2026-07-12T12:00:00+08:00')
+    expect(new Date(generatedAtFromMarkdown(first)).getTime()).toBe(
+      highFidelityDoc.generatedAt,
+    )
   })
 
   it('marks a partial export with its incomplete chunk count', () => {
