@@ -31,6 +31,6 @@ jobs:
       - run: pnpm test:e2e
       - run: pnpm zip
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: .output/*-chrome.zip
