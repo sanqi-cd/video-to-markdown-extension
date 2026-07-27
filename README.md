@@ -1,10 +1,12 @@
-# Video to Markdown
-
-![Video to Markdown 图标](./public/icon/128.png)
-
-[![CI](https://github.com/sanqi-cd/video-to-markdown-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/sanqi-cd/video-to-markdown-extension/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/sanqi-cd/video-to-markdown-extension)](https://github.com/sanqi-cd/video-to-markdown-extension/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+<div align="center">
+  <h1>Video to Markdown</h1>
+  <img src="./public/icon/128.png" width="128" alt="Video to Markdown 图标">
+  <p>
+    <a href="https://github.com/sanqi-cd/video-to-markdown-extension/actions/workflows/ci.yml"><img src="https://github.com/sanqi-cd/video-to-markdown-extension/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/sanqi-cd/video-to-markdown-extension/releases"><img src="https://img.shields.io/github/v/release/sanqi-cd/video-to-markdown-extension" alt="GitHub Release"></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  </p>
+</div>
 
 将 YouTube、哔哩哔哩已有字幕转换为中文或英文 Markdown 文档的本地优先 Chrome 插件。当前版本为 **0.2.0（Side Panel 2.0）**。
 
