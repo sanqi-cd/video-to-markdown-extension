@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.2.1] - 2026-07-28
+
+### Fixed
+
+- 修复 Markdown 生成时间测试依赖本机时区的问题，保证 UTC 和不同时区的 CI 环境得到一致验证结果。
+
+### Changed
+
+- 更新 React、React DOM、Playwright、Vite React 插件和 Prettier 等维护依赖。
+- 将 GitHub Actions 更新到 Node 24 运行时版本，消除旧运行时弃用警告。
+
+### Security
+
+- 为 `main` 启用分支保护、必需 CI、禁止强制推送和删除。
+- 启用 Dependabot 漏洞告警、安全更新、Secret Scanning 和 Push Protection。
+
 ## [0.2.0] - 2026-07-27
 
 ### Added
@@ -34,5 +50,6 @@
 - YouTube 与哔哩哔哩字幕提取 MVP。
 - 高保真和 AI 精炼的初始实现。
 
+[0.2.1]: https://github.com/sanqi-cd/video-to-markdown-extension/releases/tag/v0.2.1
 [0.2.0]: https://github.com/sanqi-cd/video-to-markdown-extension/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sanqi-cd/video-to-markdown-extension/releases/tag/v0.1.0
