@@ -8,7 +8,7 @@
   </p>
 </div>
 
-将 YouTube、哔哩哔哩已有字幕转换为中文或英文 Markdown 文档的本地优先 Chrome 插件。当前版本为 **0.2.0（Side Panel 2.0）**。
+将 YouTube、哔哩哔哩已有字幕转换为中文或英文 Markdown 文档的本地优先 Chrome 插件。当前版本为 **0.2.1（Side Panel 2.0）**。
 
 ## 产品展示
 
