@@ -1,7 +1,11 @@
 import { AppError, type PublicAppError } from '../errors/app-error'
 import { normalizeCues } from '../processors/normalize'
+import {
+  requireCompletePublisherTranscript,
+  requireCompleteSubtitle,
+} from '../processors/subtitle-quality'
 import { buildParagraphs, type SubtitleParagraph } from '../processors/paragraphs'
-import { chunkParagraphs, type ParagraphChunk } from '../processors/chunk'
+import { chunkParagraphs, DEFAULT_MAX_SPAN_MS, type ParagraphChunk } from '../processors/chunk'
 import { processHighFidelity, type TranslatedParagraph } from '../processors/high-fidelity'
 import {
   processRefinedMapChunk,
@@ -19,10 +23,13 @@ import type {
 import type {
   ModelCallContext,
   SubtitleAdapter,
+  SubtitleCue,
+  SubtitleTrack,
   ModelProvider,
   VideoMetadata,
 } from './contracts'
 import type { OutputLanguage } from './language'
+import { subtitleFallbackTracks } from './language'
 
 export type {
   FailedChunk,
@@ -64,10 +71,15 @@ type TaskSession = {
 }
 
 const RETRY_POLICY = {
-  maxAttempts: 3,
+  maxAttempts: 4,
   baseDelayMs: 500,
-  maxDelayMs: 4_000,
+  maxDelayMs: 30_000,
 }
+
+/** Small pause between model chunks to reduce rate-limit pressure. */
+const INTER_CHUNK_DELAY_MS = 300
+
+export const DEFAULT_MAX_INPUT_CHARS = 4_000
 
 export class TaskOrchestrator {
   private state: TaskState = createTaskSnapshot()
@@ -120,20 +132,17 @@ export class TaskOrchestrator {
       this.throwIfAborted(signal)
       const tracks = await this.adapter.getSubtitleTracks()
       this.throwIfAborted(signal)
-      const track = tracks.find((item) => item.id === request.trackId)
-      if (!track) {
+      if (!tracks.some((item) => item.id === request.trackId)) {
         throw new AppError('SUBTITLE_EXTRACTION_FAILED', '未找到所选字幕轨道')
       }
-
-      const rawCues = await this.adapter.getCues(track)
-      this.throwIfAborted(signal)
-      const cues = normalizeCues(rawCues)
-      if (cues.length === 0) {
-        throw new AppError(
-          'SUBTITLE_EXTRACTION_FAILED',
-          '字幕轨道没有可提取的文字内容，请切换字幕或刷新页面后重试',
-        )
-      }
+      const resolved = await this.resolveCompleteTrack(
+        tracks,
+        request.trackId,
+        request.outputLanguage ?? 'zh',
+        metadata,
+        signal,
+      )
+      const { track, cues } = resolved
       this.dispatch({
         type: 'SUBTITLE_LOADED',
         taskId,
@@ -143,8 +152,9 @@ export class TaskOrchestrator {
 
       const paragraphs = buildParagraphs(cues)
       const chunks = chunkParagraphs(paragraphs, {
-        maxInputChars: request.maxInputChars ?? 8_000,
+        maxInputChars: request.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
         overlapParagraphs: request.mode === 'refined' ? 1 : 0,
+        maxSpanMs: DEFAULT_MAX_SPAN_MS,
       })
       this.dispatch({
         type: 'PARAGRAPHS_READY',
@@ -158,6 +168,10 @@ export class TaskOrchestrator {
         metadata,
         request: {
           ...request,
+          trackId: track.id,
+          sourceLanguage: track.id === request.trackId
+            ? request.sourceLanguage
+            : track.language,
           outputLanguage: request.outputLanguage ?? 'zh',
         },
         paragraphs,
@@ -172,6 +186,49 @@ export class TaskOrchestrator {
     } catch (error) {
       this.handleTerminalError(error, signal, taskId, session)
     }
+  }
+
+  private async resolveCompleteTrack(
+    tracks: SubtitleTrack[],
+    selectedTrackId: string,
+    outputLanguage: OutputLanguage,
+    metadata: VideoMetadata,
+    signal: AbortSignal,
+  ): Promise<{ track: SubtitleTrack; cues: SubtitleCue[] }> {
+    const candidates = subtitleFallbackTracks(tracks, selectedTrackId, outputLanguage)
+    let firstError: unknown = null
+
+    for (const track of candidates) {
+      try {
+        const rawCues = await this.adapter.getCues(track)
+        this.throwIfAborted(signal)
+        const cues = normalizeCues(rawCues)
+        if (cues.length === 0) {
+          throw new AppError(
+            'SUBTITLE_EXTRACTION_FAILED',
+            '字幕轨道没有可提取的文字内容，请切换字幕或刷新页面后重试',
+          )
+        }
+        const qualityMetadata = {
+          ...metadata,
+          durationMs: track.sourceDurationMs ?? metadata.durationMs,
+        }
+        if (track.sourceKind === 'publisher-transcript') {
+          requireCompletePublisherTranscript(qualityMetadata, cues)
+        } else {
+          requireCompleteSubtitle(qualityMetadata, cues)
+        }
+        return { track, cues }
+      } catch (error) {
+        this.throwIfAborted(signal)
+        firstError ??= error
+      }
+    }
+
+    throw firstError ?? new AppError(
+      'SUBTITLE_EXTRACTION_FAILED',
+      '当前视频没有通过完整性校验的字幕轨道',
+    )
   }
 
   async retryFailed(): Promise<void> {
@@ -189,9 +246,14 @@ export class TaskOrchestrator {
 
   private async processSession(session: TaskSession, signal: AbortSignal): Promise<void> {
     const pendingChunks = session.chunks.filter((chunk) => !session.completed.has(chunk.id))
+    let processedCount = 0
 
     for (const chunk of pendingChunks) {
       this.throwIfAborted(signal)
+      if (processedCount > 0) {
+        await this.sleep(INTER_CHUNK_DELAY_MS, signal)
+      }
+      processedCount += 1
       const chunkIndex = session.chunks.findIndex((item) => item.id === chunk.id)
       this.dispatch({
         type: 'CHUNK_STARTED',
@@ -204,6 +266,11 @@ export class TaskOrchestrator {
         const content = await withRetry(
           () => {
             session.incrementalChunks.delete(chunk.id)
+            this.dispatch({
+              type: 'CONTENT_CLEARED',
+              taskId: session.taskId,
+              chunkId: chunk.id,
+            })
             return this.processChunk(session, chunk, signal)
           },
           RETRY_POLICY,
@@ -242,6 +309,11 @@ export class TaskOrchestrator {
         })
       } catch (error) {
         this.throwIfAborted(signal)
+        this.dispatch({
+          type: 'CONTENT_CLEARED',
+          taskId: session.taskId,
+          chunkId: chunk.id,
+        })
         session.failed.set(chunk.id, this.toPublicError(error))
       }
     }
@@ -275,6 +347,11 @@ export class TaskOrchestrator {
       const content = await withRetry(
         () => {
           session.incrementalChunks.delete('reduce')
+          this.dispatch({
+            type: 'CONTENT_CLEARED',
+            taskId: session.taskId,
+            chunkId: 'reduce',
+          })
           return reduceRefinedMapResults(
             mapResults,
             session.paragraphs.map((paragraph) => paragraph.id),
@@ -312,6 +389,11 @@ export class TaskOrchestrator {
       this.dispatch({ type: 'TASK_COMPLETED', taskId: session.taskId, document })
     } catch (error) {
       this.throwIfAborted(signal)
+      this.dispatch({
+        type: 'CONTENT_CLEARED',
+        taskId: session.taskId,
+        chunkId: 'reduce',
+      })
       session.failed.set('reduce', this.toPublicError(error))
       this.setPartial(session)
     }

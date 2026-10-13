@@ -3,6 +3,7 @@ import { Button } from './ui/Button'
 import { VideoCard } from './ui/VideoCard'
 import { ModeSelector, type ModelConnectionStatus } from './ModeSelector'
 import { OutputLanguageSelector } from './OutputLanguageSelector'
+import { ManualYouTubeSourceForm } from './ManualYouTubeSourceForm'
 import {
   subtitleTrackLabel,
   type OutputLanguage,
@@ -10,6 +11,7 @@ import {
 
 interface PrepareViewProps {
   metadata: VideoMetadata
+  onRedetect?: () => void
   tracks: SubtitleTrack[]
   selectedTrackId: string
   trackSelection: 'auto' | string
@@ -21,6 +23,7 @@ interface PrepareViewProps {
   onModeChange: (mode: 'high-fidelity' | 'refined') => void
   onTimestampsChange: (v: boolean) => void
   onStart: () => void
+  onManualYouTubeSource?: (url: string) => Promise<void>
   showAction?: boolean
   actionLabel?: string
   modelStatus?: ModelConnectionStatus
@@ -28,6 +31,7 @@ interface PrepareViewProps {
 
 export function PrepareView({
   metadata,
+  onRedetect,
   tracks,
   selectedTrackId,
   trackSelection,
@@ -39,22 +43,25 @@ export function PrepareView({
   onModeChange,
   onTimestampsChange,
   onStart,
+  onManualYouTubeSource,
   showAction = true,
   actionLabel = '开始生成',
   modelStatus = 'missing',
 }: PrepareViewProps) {
   const selectedTrack = tracks.find((track) => track.id === selectedTrackId)
+  const hasRealTimestamps = selectedTrack?.hasTimestamps !== false
   return (
     <div className="prepare-view">
       <VideoCard
         metadata={metadata}
+        onRedetect={onRedetect}
         subtitle={selectedTrack ? `字幕：${subtitleTrackLabel(selectedTrack)}` : '未识别字幕'}
       />
 
       <section className="settings-section" aria-labelledby="generation-settings-title">
         <div className="section-heading">
           <h2 id="generation-settings-title">生成设置</h2>
-          <p>选择最终文档语言和内容处理方式</p>
+          <p>字幕已通过基础检查。选择最终文档语言和内容处理方式。</p>
         </div>
 
         <OutputLanguageSelector
@@ -84,10 +91,14 @@ export function PrepareView({
                 className="toggle-switch"
                 aria-label="保留时间戳"
                 type="checkbox"
-                checked={includeTimestamps}
+                checked={includeTimestamps && hasRealTimestamps}
+                disabled={!hasRealTimestamps}
                 onChange={(event) => onTimestampsChange(event.target.checked)}
               />
             </label>
+            {!hasRealTimestamps && (
+              <p className="toggle-setting__notice">发布者文稿没有可靠时间轴，因此不会生成跳转时间点。</p>
+            )}
 
             <details className="subtitle-source">
               <summary>
@@ -110,6 +121,9 @@ export function PrepareView({
                   ))}
                 </select>
                 <p>一般无需修改。自动模式会根据输出语言和字幕质量选择合适轨道。</p>
+                {metadata.platform === 'bilibili' && onManualYouTubeSource && (
+                  <ManualYouTubeSourceForm compact onSubmit={onManualYouTubeSource} />
+                )}
               </div>
             </details>
           </div>

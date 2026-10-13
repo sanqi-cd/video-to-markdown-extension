@@ -20,13 +20,23 @@ export function sanitizeFilename(name: string): string {
   return sanitized || 'video-to-markdown'
 }
 
-export function timestampUrl(platform: Platform, videoId: string, ms: number): string {
+export function timestampUrl(
+  platform: Platform,
+  videoId: string,
+  ms: number,
+  canonicalUrl?: string,
+): string {
   const seconds = Math.floor(ms / 1000)
   switch (platform) {
     case 'youtube':
       return `https://www.youtube.com/watch?v=${videoId}&t=${seconds}s`
-    case 'bilibili':
-      return `https://www.bilibili.com/video/${videoId}?t=${seconds}`
+    case 'bilibili': {
+      const url = new URL(
+        canonicalUrl ?? `https://www.bilibili.com/video/${videoId}`,
+      )
+      url.searchParams.set('t', String(seconds))
+      return url.toString()
+    }
   }
 }
 
@@ -97,13 +107,14 @@ function renderHighFidelity(
   content: TranslatedParagraph[],
   platform: Platform,
   videoId: string,
+  canonicalUrl: string,
   opts: RenderOptions,
 ): string {
   const parts: string[] = []
 
   for (const p of content) {
     if (opts.includeTimestamps) {
-      const url = timestampUrl(platform, videoId, p.startMs)
+      const url = timestampUrl(platform, videoId, p.startMs, canonicalUrl)
       parts.push(`[${formatTimestamp(p.startMs)}](${url})`, '')
     }
     parts.push(p.text, '')
@@ -116,6 +127,7 @@ function renderRefined(
   content: RefinedDocument,
   platform: Platform,
   videoId: string,
+  canonicalUrl: string,
   opts: RenderOptions,
   paragraphTimestamps: Record<string, number>,
   outputLanguage: OutputLanguage,
@@ -146,6 +158,7 @@ function renderRefined(
         paragraphTimestamps,
         platform,
         videoId,
+        canonicalUrl,
         opts,
         outputLanguage,
       )
@@ -162,6 +175,7 @@ function renderRefined(
         paragraphTimestamps,
         platform,
         videoId,
+        canonicalUrl,
         opts,
         outputLanguage,
       )
@@ -182,6 +196,7 @@ function appendSourceTimestamp(
   paragraphTimestamps: Record<string, number>,
   platform: Platform,
   videoId: string,
+  canonicalUrl: string,
   opts: RenderOptions,
   outputLanguage: OutputLanguage = 'zh',
 ): void {
@@ -191,7 +206,7 @@ function appendSourceTimestamp(
     .find((value): value is number => value !== undefined)
   if (startMs === undefined) return
   const source = outputLanguage === 'zh' ? '来源' : 'Source'
-  lines.push(`  - [${source} ${formatTimestamp(startMs)}](${timestampUrl(platform, videoId, startMs)})`, '')
+  lines.push(`  - [${source} ${formatTimestamp(startMs)}](${timestampUrl(platform, videoId, startMs, canonicalUrl)})`, '')
 }
 
 export function renderMarkdown(
@@ -206,6 +221,7 @@ export function renderMarkdown(
       doc.content as TranslatedParagraph[],
       doc.metadata.platform,
       doc.metadata.videoId,
+      doc.metadata.canonicalUrl,
       opts,
     )
   } else {
@@ -213,6 +229,7 @@ export function renderMarkdown(
       doc.content as RefinedDocument,
       doc.metadata.platform,
       doc.metadata.videoId,
+      doc.metadata.canonicalUrl,
       opts,
       doc.paragraphTimestamps ?? {},
       doc.outputLanguage ?? 'zh',

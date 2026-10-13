@@ -26,7 +26,7 @@ describe('model requirement', () => {
       />,
     )
     expect(screen.getByText('无需模型')).toBeVisible()
-    expect(screen.getByText('模型未配置')).toBeVisible()
+    expect(screen.getByText('文档处理模型未配置')).toBeVisible()
   })
 
   it('shows a tested model as connected for model-dependent modes', () => {
@@ -39,7 +39,7 @@ describe('model requirement', () => {
         onChange={vi.fn()}
       />,
     )
-    expect(screen.getByText('模型已连接')).toBeVisible()
+    expect(screen.getByText('文档处理模型已连接')).toBeVisible()
     expect(screen.queryByText('无需模型')).not.toBeInTheDocument()
   })
 })

@@ -102,6 +102,10 @@ export async function requestVideoContext(
       if (attempt < attempts - 1) await sleep(retryDelayMs)
       continue
     }
+    if (payload.data.page !== (tab.video.page ?? 1)) {
+      if (attempt < attempts - 1) await sleep(retryDelayMs)
+      continue
+    }
     return { platform: 'bilibili', data: payload.data }
   }
 
@@ -117,6 +121,9 @@ export function mapVideoContextError(
   }
   if (error instanceof AppError && error.code === 'NO_SUBTITLE' && options.metadata) {
     return { status: 'no-subtitle', metadata: options.metadata }
+  }
+  if (error instanceof AppError && error.code === 'SUBTITLE_UNRELIABLE' && options.metadata) {
+    return { status: 'no-subtitle', metadata: options.metadata, reason: 'unreliable' }
   }
   if (error instanceof AppError) return { status: 'failed', error: error.toJSON() }
   return {

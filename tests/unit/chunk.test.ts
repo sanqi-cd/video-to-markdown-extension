@@ -86,14 +86,18 @@ describe('chunkParagraphs', () => {
     expect(result[0]!.inputChars).toBe(12)
   })
 
-  it('preserves original paragraph order', () => {
+  it('splits when the subtitle time span exceeds maxSpanMs', () => {
     const paragraphs = [
-      p({ id: 'p1', text: 'A'.repeat(100) }),
-      p({ id: 'p2', text: 'B'.repeat(100) }),
-      p({ id: 'p3', text: 'C'.repeat(100) }),
+      p({ id: 'p1', text: 'First.', startMs: 0, endMs: 1_000 }),
+      p({ id: 'p2', text: 'Second.', startMs: 180_000, endMs: 181_000 }),
     ]
-    const result = chunkParagraphs(paragraphs, { maxInputChars: 150, overlapParagraphs: 0 })
-    const allParagraphs = result.flatMap((chunk) => chunk.paragraphs)
-    expect(allParagraphs.map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
+    const result = chunkParagraphs(paragraphs, {
+      maxInputChars: 500,
+      overlapParagraphs: 0,
+      maxSpanMs: 60_000,
+    })
+    expect(result).toHaveLength(2)
+    expect(result[0]!.paragraphs.map((item) => item.id)).toEqual(['p1'])
+    expect(result[1]!.paragraphs.map((item) => item.id)).toEqual(['p2'])
   })
 })

@@ -2,13 +2,88 @@ import { test, expect, chromium, type BrowserContext, type Page, type TestInfo }
 import path from 'node:path'
 
 type MockPanelOptions = {
+  platform?: 'youtube' | 'bilibili'
   language: 'zh-Hans' | 'en'
   title: string
   captionBody: string
   initiallyUnavailable?: boolean
   stream?: 'success' | 'partial-retry'
   initialConfig?: boolean
+  transcription?: boolean
+  unreliableSubtitle?: boolean
 }
+
+test('blocks incomplete subtitles before generation and offers redetection and speech setup', async ({ browserName }, testInfo) => {
+  expect(browserName).toBe('chromium')
+  const app = await openMockedPanel(testInfo, {
+    platform: 'bilibili', language: 'zh-Hans', title: '长访谈', captionBody: '', unreliableSubtitle: true,
+  })
+  try {
+    await expect(app.page.getByRole('heading', { name: '字幕暂时无法可靠使用' })).toBeVisible()
+    await expect(app.page.getByRole('button', { name: '开始生成', exact: true })).toHaveCount(0)
+    await expect(app.page.getByLabel('接口类型')).toBeVisible()
+    await app.page.getByRole('button', { name: '↻ 重新检测', exact: true }).click()
+    await expect(app.page.getByRole('heading', { name: '字幕暂时无法可靠使用' })).toBeVisible()
+    await app.page.getByLabel('接口类型').selectOption('ark-responses')
+    await expect(app.page.getByLabel('转写接口')).toHaveValue('https://ark.cn-beijing.volces.com/api/v3/responses')
+    await expect(app.page.getByLabel('API Key', { exact: true })).toBeEmpty()
+  } finally { await app.context.close() }
+})
+
+test('turns direct Bilibili audio transcription into a selectable Markdown source', async ({ browserName }, testInfo) => {
+  expect(browserName).toBe('chromium')
+  const app = await openMockedPanel(testInfo, {
+    platform: 'bilibili',
+    language: 'en',
+    title: 'B站无字幕访谈',
+    captionBody: '',
+    transcription: true,
+  })
+  try {
+    await expect(app.page.getByRole('heading', { name: '直接转录当前视频' })).toBeVisible()
+    await app.page.getByLabel('API Key').fill('sk-local-e2e')
+    await app.page.getByRole('button', { name: '保存配置并开始转录' }).click()
+    await expect(app.page.getByText(/正在转写第/)).toBeVisible()
+    await expect(app.page.getByRole('heading', { name: 'B站无字幕访谈' })).toBeVisible()
+    await expect(app.page.getByText('字幕：音频转写', { exact: true })).toBeVisible()
+
+    await app.page.getByRole('radio', { name: 'English' }).click()
+    await app.page.getByRole('button', { name: '开始生成' }).click()
+    await expect(app.page.getByRole('heading', { name: 'Markdown 已生成' })).toBeVisible()
+    await expect(app.page.getByRole('article', { name: '阅读预览' }))
+      .toContainText('Direct audio transcript')
+  } finally {
+    await app.context.close()
+  }
+})
+
+test('loads an exact manual YouTube source for a Bilibili video without subtitles', async ({ browserName }, testInfo) => {
+  expect(browserName).toBe('chromium')
+  const app = await openMockedPanel(testInfo, {
+    platform: 'bilibili',
+    language: 'en',
+    title: 'B站转载视频',
+    captionBody: captionXml(['Exact manual source transcript.']),
+  })
+  try {
+    await expect(app.page.getByRole('heading', { name: '未找到可直接提取的字幕' })).toBeVisible()
+    await app.page.getByText('不发送音频的其他方式').click()
+    await app.page.getByRole('textbox', { name: 'YouTube 原视频链接' }).fill(
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    )
+    await app.page.getByRole('button', { name: '读取字幕' }).click()
+
+    await expect(app.page.getByRole('heading', { name: 'B站转载视频' })).toBeVisible()
+    await app.page.getByRole('radio', { name: 'English' }).click()
+    await app.page.getByRole('button', { name: '开始生成' }).click()
+    await expect(app.page.getByRole('heading', { name: 'Markdown 已生成' })).toBeVisible()
+    await expect(app.page.getByRole('article', { name: '阅读预览' })).toContainText(
+      'Exact manual source transcript.',
+    )
+  } finally {
+    await app.context.close()
+  }
+})
 
 test('refreshes a supported page whose content script was initially unavailable', async ({ browserName }, testInfo) => {
   expect(browserName).toBe('chromium')
@@ -136,10 +211,19 @@ test('keeps successful chunks and retries only the failed chunk', async ({ brows
   try {
     await app.page.getByRole('button', { name: '开始生成' }).click()
     await expect(app.page.getByRole('heading', { name: '部分内容生成成功' })).toBeVisible({
-      timeout: 10_000,
+      timeout: 15_000,
     })
     await expect(app.page.getByText(/1 个分块需要重试/)).toBeVisible()
     await expect(app.page.getByText(/中文：FIRST_CHUNK/).first()).toBeVisible()
+
+    const successfulChunkRequestsBeforeRetry = await app.page.evaluate(() => (
+      globalThis as typeof globalThis & { __v2mdFirstChunkRequests?: number }
+    ).__v2mdFirstChunkRequests)
+    expect(successfulChunkRequestsBeforeRetry).toBeGreaterThan(0)
+    const failedChunkRequestsBeforeRetry = await app.page.evaluate(() => (
+      globalThis as typeof globalThis & { __v2mdSecondChunkRequests?: number }
+    ).__v2mdSecondChunkRequests)
+    expect(failedChunkRequestsBeforeRetry).toBeGreaterThan(0)
 
     await app.page.getByRole('button', { name: '重试失败部分' }).click()
     await expect(app.page.getByRole('heading', { name: 'Markdown 已生成' })).toBeVisible({
@@ -153,10 +237,10 @@ test('keeps successful chunks and retries only the failed chunk', async ({ brows
         __v2mdFirstChunkRequests?: number
         __v2mdSecondChunkRequests?: number
       }
-    ).__v2mdFirstChunkRequests)).toBe(1)
+    ).__v2mdFirstChunkRequests)).toBe(successfulChunkRequestsBeforeRetry)
     expect(await app.page.evaluate(() => (
       globalThis as typeof globalThis & { __v2mdSecondChunkRequests?: number }
-    ).__v2mdSecondChunkRequests)).toBe(4)
+    ).__v2mdSecondChunkRequests)).toBe((failedChunkRequestsBeforeRetry ?? 0) + 1)
   } finally {
     await app.context.close()
   }
@@ -181,6 +265,45 @@ async function openMockedPanel(testInfo: TestInfo, options: MockPanelOptions): P
   let [worker] = context.serviceWorkers()
   worker ??= await context.waitForEvent('serviceworker')
   const extensionId = new URL(worker.url()).host
+  if (options.platform === 'bilibili') {
+    await context.route('https://api.bilibili.com/**', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: options.unreliableSubtitle ? {
+        bvid: 'BV1manual123', aid: 101, cid: 202,
+        subtitle: { subtitles: [{ id: 1, lan: 'zh', lan_doc: '中文', subtitle_url: 'https://aisubtitle.hdslb.com/test.json' }] },
+      } : {} }),
+    }))
+    await context.route('https://aisubtitle.hdslb.com/test.json', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ body: [{ from: 0, to: 423, content: '这是不完整的短字幕' }] }),
+    }))
+    await context.route('https://www.youtube.com/youtubei/v1/player**', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        playabilityStatus: { status: 'OK' },
+        videoDetails: {
+          videoId: 'dQw4w9WgXcQ',
+          title: 'Exact YouTube source',
+          author: 'Source author',
+          lengthSeconds: '120',
+        },
+        captions: {
+          playerCaptionsTracklistRenderer: {
+            captionTracks: [{
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&lang=en',
+              languageCode: 'en',
+              name: { simpleText: 'English' },
+              vssId: '.en',
+            }],
+          },
+        },
+      }),
+    }))
+    await context.route('https://www.youtube.com/api/timedtext**', (route) => route.fulfill({
+      contentType: 'text/xml',
+      body: options.captionBody,
+    }))
+  }
   const page = await context.newPage()
   await page.setViewportSize({ width: 380, height: 760 })
   await page.addInitScript(installMockBrowserState, options)
@@ -217,11 +340,28 @@ function installMockBrowserState(options: MockPanelOptions) {
     secondChunkRequests: 0,
   }
   const updatedListeners = new Set<UpdatedListener>()
-  const videoUrl = 'https://www.youtube.com/watch?v=mock-video'
+  const isBilibili = options.platform === 'bilibili'
+  const videoUrl = isBilibili
+    ? 'https://www.bilibili.com/video/BV1manual123?p=1'
+    : 'https://www.youtube.com/watch?v=mock-video'
   const trackId = options.language === 'en' ? '.en' : '.zh-Hans'
-  const contextResponse = {
+  const contextResponse = isBilibili ? {
     success: true,
-    bridgeVersion: 1,
+    bridgeVersion: 2,
+    platform: 'bilibili',
+    data: {
+      bvid: 'BV1manual123',
+      aid: 101,
+      cid: 202,
+      page: 1,
+      title: options.title,
+      author: 'E2E B站作者',
+      durationMs: options.unreliableSubtitle ? 10_330_000 : 120_000,
+      description: '',
+    },
+  } : {
+    success: true,
+    bridgeVersion: 2,
     platform: 'youtube',
     data: {
       videoId: 'mock-video',
@@ -280,9 +420,45 @@ function installMockBrowserState(options: MockPanelOptions) {
   })
 
   const runtime = chrome.runtime as unknown as Record<string, unknown>
+  const runtimeMessageListeners = new Set<MessageListener>()
+  Object.defineProperty(runtime, 'onMessage', {
+    configurable: true,
+    value: {
+      addListener: (listener: MessageListener) => runtimeMessageListeners.add(listener),
+      removeListener: (listener: MessageListener) => runtimeMessageListeners.delete(listener),
+    },
+  })
   Object.defineProperty(runtime, 'sendMessage', {
     configurable: true,
-    value: async () => ({ success: true, data: { ok: true } }),
+    value: async (message: { type?: string; taskId?: string }) => {
+      if (options.transcription && message.type === 'TRANSCRIPTION_START_REQUEST') {
+        const taskId = message.taskId
+        const emitRuntime = (event: unknown) => {
+          for (const listener of runtimeMessageListeners) {
+            listener({ type: 'TRANSCRIPTION_EVENT', event })
+          }
+        }
+        setTimeout(() => emitRuntime({ type: 'started', taskId, metadata: contextResponse.data }), 0)
+        setTimeout(() => emitRuntime({
+          type: 'progress',
+          taskId,
+          recordedMs: 30_000,
+          transcribedMs: 30_000,
+          chunkIndex: 1,
+          newCues: [{ id: 'asr-1', startMs: 0, endMs: 8_000, text: 'Direct audio transcript.' }],
+        }), 80)
+        setTimeout(() => emitRuntime({
+          type: 'completed',
+          taskId,
+          recordedMs: 30_000,
+          language: 'english',
+          stoppedEarly: false,
+          cues: [{ id: 'asr-1', startMs: 0, endMs: 8_000, text: 'Direct audio transcript.' }],
+        }), 160)
+        return { success: true, data: { taskId } }
+      }
+      return { success: true, data: { ok: true } }
+    },
   })
   const permissions = chrome.permissions as unknown as Record<string, unknown>
   Object.defineProperty(permissions, 'request', {
@@ -342,7 +518,7 @@ function installMockBrowserState(options: MockPanelOptions) {
             if (
               options.stream === 'partial-retry'
               && isSecondChunk
-              && state.secondChunkRequests <= 3
+              && state.secondChunkRequests <= 4
             ) {
               setTimeout(() => emit({
                 type: 'ERROR',

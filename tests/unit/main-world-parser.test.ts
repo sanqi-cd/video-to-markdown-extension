@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBilibiliMainWorldContext } from '../../src/adapters/bilibili/main-world-parser'
+import { parseBilibiliMainWorldContext, collectBilibiliDescription, resolveBilibiliPlayback } from '../../src/adapters/bilibili/main-world-parser'
 import { parseYouTubeInitialPlayerResponse } from '../../src/adapters/youtube/main-world-parser'
 import youtubePlayerResponse from '../fixtures/youtube/player-response.json'
 
@@ -43,6 +43,7 @@ describe('MAIN world parsers', () => {
       bvid: 'BV1xx411c7mD',
       aid: 1,
       cid: 2,
+      page: 1,
       title: '测试视频',
       author: '测试作者',
       durationMs: 120_000,
@@ -50,6 +51,7 @@ describe('MAIN world parsers', () => {
       bvid: 'BV1xx411c7mD',
       aid: 1,
       cid: 2,
+      page: 1,
       title: '测试视频',
       author: '测试作者',
       durationMs: 120_000,
@@ -61,7 +63,36 @@ describe('MAIN world parsers', () => {
       bvid: 'BV1xx411c7mD',
       aid: 1,
       cid: -1,
+      page: 1,
       title: '测试视频',
     })).toBeNull()
+  })
+
+  it('collects Bilibili title and description fields for YouTube source detection', () => {
+    expect(collectBilibiliDescription({
+      title: '转载',
+      desc: '来源 https://youtu.be/abcdefghijk',
+      desc_v2: [{ raw_text: '更多说明' }],
+    })).toContain('abcdefghijk')
+    expect(collectBilibiliDescription({
+      title: '转载',
+      desc: '来源 https://youtu.be/abcdefghijk',
+    })).not.toContain('转载')
+  })
+
+  it('resolves cid and duration from the current Bilibili page index', () => {
+    expect(resolveBilibiliPlayback({
+      cid: 111,
+      title: '合集',
+      duration: 999,
+      pages: [
+        { cid: 111, page: 1, part: '美食', duration: 600 },
+        { cid: 222, page: 2, part: '访谈', duration: 3600 },
+      ],
+    }, 2)).toEqual({
+      cid: 222,
+      durationMs: 3_600_000,
+      title: '合集 - 访谈',
+    })
   })
 })

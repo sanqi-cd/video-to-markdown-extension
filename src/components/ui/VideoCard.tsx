@@ -4,9 +4,10 @@ import { StatusBadge } from './StatusBadge'
 interface VideoCardProps {
   metadata: VideoMetadata
   subtitle?: string
+  onRedetect?: () => void
 }
 
-export function VideoCard({ metadata, subtitle }: VideoCardProps) {
+export function VideoCard({ metadata, subtitle, onRedetect }: VideoCardProps) {
   const platform = metadata.platform === 'youtube' ? 'YouTube' : '哔哩哔哩'
   const details = [metadata.author, formatDuration(metadata.durationMs)].filter(Boolean).join(' · ')
 
@@ -15,6 +16,8 @@ export function VideoCard({ metadata, subtitle }: VideoCardProps) {
       <div className="video-card__topline">
         <StatusBadge tone="info">{platform}</StatusBadge>
         {subtitle && <span className="video-card__subtitle">{subtitle}</span>}
+        {onRedetect && <button type="button" className="video-card__redetect" onClick={onRedetect}
+          title="重新读取视频和字幕，不会刷新网页">↻ 重新检测</button>}
       </div>
       <h2 className="video-card__title">{metadata.title}</h2>
       {details && <p className="video-card__details">{details}</p>}

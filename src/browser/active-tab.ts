@@ -4,6 +4,8 @@ import { AppError } from '../errors/app-error'
 export type VideoUrlMatch = {
   platform: Platform
   videoId: string
+  /** Bilibili multi-part page number. YouTube videos always omit this field. */
+  page?: number
 }
 
 export type ActiveTabSnapshot = {
@@ -39,7 +41,11 @@ export function classifyVideoUrl(input: string | undefined): VideoUrlMatch | nul
   const bilibiliHost = hostname === 'bilibili.com' || hostname === 'www.bilibili.com'
   if (bilibiliHost) {
     const match = url.pathname.match(/^\/video\/(BV[0-9A-Za-z]+)(?:\/|$)/i)
-    if (match?.[1]) return { platform: 'bilibili', videoId: match[1] }
+    if (match?.[1]) {
+      const parsedPage = Number.parseInt(url.searchParams.get('p') ?? '1', 10)
+      const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
+      return { platform: 'bilibili', videoId: match[1], page }
+    }
   }
 
   return null
@@ -57,7 +63,12 @@ export async function getActiveTabSnapshot(
 }
 
 export function activeTabIdentity(tab: ActiveTabSnapshot): string {
-  if (tab.video) return `${tab.tabId}:${tab.video.platform}:${tab.video.videoId}`
+  if (tab.video) {
+    const pageIdentity = tab.video.platform === 'bilibili'
+      ? `:p${tab.video.page ?? 1}`
+      : ''
+    return `${tab.tabId}:${tab.video.platform}:${tab.video.videoId}${pageIdentity}`
+  }
   return `${tab.tabId}:unsupported:${tab.url}`
 }
 

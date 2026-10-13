@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OpenAICompatibleProvider } from '../../src/model/openai-provider'
+import { OpenAICompatibleProvider, parseRetryAfterMs } from '../../src/model/openai-provider'
 import type { ModelConfig } from '../../src/model/config-store'
 import type { ModelRequest } from '../../src/core/contracts'
 
@@ -141,7 +141,7 @@ describe('OpenAICompatibleProvider', () => {
     expect(body.max_tokens).toBe(16)
   })
 
-  it('times out connection tests after 15 seconds', async () => {
+  it('times out connection tests after 15 seconds of idle', async () => {
     vi.useFakeTimers()
     try {
       const fetcher = vi.fn((_url: string, init: RequestInit) => new Promise<Response>(
@@ -152,13 +152,66 @@ describe('OpenAICompatibleProvider', () => {
         },
       ))
       const provider = new OpenAICompatibleProvider(config, fetcher as typeof fetch)
-      const result = expect(provider.testConnection()).rejects.toThrow('请求超时（15 秒）')
+      const result = expect(provider.testConnection()).rejects.toThrow('请求空闲超时（15 秒')
 
       await vi.advanceTimersByTimeAsync(15_000)
       await result
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('resets the idle timeout while SSE deltas keep arriving', async () => {
+    vi.useFakeTimers()
+    try {
+      const encoder = new TextEncoder()
+      const pending: Array<() => void> = []
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(
+            'data: {"choices":[{"delta":{"content":"a"}}]}\n\n',
+          ))
+          pending.push(() => {
+            controller.enqueue(encoder.encode(
+              'data: {"choices":[{"delta":{"content":"b"}}]}\n\n',
+            ))
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            controller.close()
+          })
+        },
+      })
+      const fetcher = vi.fn().mockResolvedValue(new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }))
+      const provider = new OpenAICompatibleProvider(config, fetcher)
+      const done = provider.completeStream(request, {
+        onConnected: vi.fn(),
+        onDelta: vi.fn(),
+      })
+
+      // Advance past the old fixed 90s wall-clock timeout; idle timer should reset on first delta.
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(100_000)
+      pending.forEach((fn) => fn())
+      await expect(done).resolves.toEqual({ content: 'ab' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('maps Retry-After on 429 responses', async () => {
+    const fetcher = vi.fn().mockResolvedValue(mockResponse({}, 429, { 'retry-after': '12' }))
+    const provider = new OpenAICompatibleProvider(config, fetcher)
+    await expect(provider.complete(request)).rejects.toMatchObject({
+      code: 'MODEL_RATE_LIMITED',
+      retryAfterMs: 12_000,
+    })
+  })
+
+  it('parses Retry-After header values', () => {
+    expect(parseRetryAfterMs('3')).toBe(3_000)
+    expect(parseRetryAfterMs(null)).toBeUndefined()
   })
 
   it('aborts the request when the signal is already aborted', async () => {

@@ -39,6 +39,12 @@ describe('active video tab', () => {
     expect(classifyVideoUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=2')).toEqual({
       platform: 'bilibili',
       videoId: 'BV1xx411c7mD',
+      page: 2,
+    })
+    expect(classifyVideoUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=invalid')).toEqual({
+      platform: 'bilibili',
+      videoId: 'BV1xx411c7mD',
+      page: 1,
     })
     expect(classifyVideoUrl('https://youtube.com.evil.test/watch?v=abc')).toBeNull()
     expect(classifyVideoUrl('https://www.youtube.com/')).toBeNull()
@@ -54,12 +60,29 @@ describe('active video tab', () => {
     const next = {
       tabId: 8,
       url: 'https://www.bilibili.com/video/BV123',
-      video: { platform: 'bilibili', videoId: 'BV123' },
+      video: { platform: 'bilibili', videoId: 'BV123', page: 1 },
     } satisfies ActiveTabSnapshot
     expect(activeTabIdentity(youtubeTab)).toBe('7:youtube:video-1')
     expect(shouldConfirmTabSwitch(youtubeTab, next, true)).toBe(true)
     expect(shouldConfirmTabSwitch(youtubeTab, next, false)).toBe(false)
     expect(shouldConfirmTabSwitch(youtubeTab, youtubeTab, true)).toBe(false)
+  })
+
+  it('treats Bilibili parts as different active videos', () => {
+    const first: ActiveTabSnapshot = {
+      tabId: 8,
+      url: 'https://www.bilibili.com/video/BV123?p=1',
+      video: { platform: 'bilibili', videoId: 'BV123', page: 1 },
+    }
+    const second: ActiveTabSnapshot = {
+      ...first,
+      url: 'https://www.bilibili.com/video/BV123?p=2',
+      video: { platform: 'bilibili', videoId: 'BV123', page: 2 },
+    }
+
+    expect(activeTabIdentity(first)).toBe('8:bilibili:BV123:p1')
+    expect(activeTabIdentity(second)).toBe('8:bilibili:BV123:p2')
+    expect(shouldConfirmTabSwitch(first, second, true)).toBe(true)
   })
 })
 
@@ -114,6 +137,7 @@ describe('versioned video context handshake', () => {
       bvid: 'BV-previous',
       aid: 1,
       cid: 2,
+      page: 1,
       title: '旧视频',
     }
 
@@ -130,6 +154,34 @@ describe('versioned video context handshake', () => {
     }).catch((reason: unknown) => reason)
 
     expect(error).toMatchObject({ code: 'CONTENT_SCRIPT_UNAVAILABLE' })
+  })
+
+  it('never accepts a Bilibili context belonging to another part', async () => {
+    const bilibiliTab: ActiveTabSnapshot = {
+      tabId: 8,
+      url: 'https://www.bilibili.com/video/BV-current?p=2',
+      video: { platform: 'bilibili', videoId: 'BV-current', page: 2 },
+    }
+    const sendMessage = vi.fn().mockResolvedValue({
+      success: true,
+      bridgeVersion: PAGE_BRIDGE_VERSION,
+      platform: 'bilibili',
+      data: {
+        bvid: 'BV-current',
+        aid: 1,
+        cid: 111,
+        page: 1,
+        title: '错误分P',
+      },
+    })
+
+    await expect(requestVideoContext(bilibiliTab, {
+      attempts: 2,
+      retryDelayMs: 0,
+      sendMessage,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    })).rejects.toMatchObject({ code: 'CONTENT_SCRIPT_UNAVAILABLE' })
+    expect(sendMessage).toHaveBeenCalledTimes(2)
   })
 
   it('maps a missing content script to refresh-required without reading error text', async () => {

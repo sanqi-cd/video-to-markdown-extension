@@ -111,6 +111,101 @@ export async function reduceRefinedMapResults(
   context?: ModelCallContext,
   outputLanguage: OutputLanguage = 'zh',
 ): Promise<RefinedDocument> {
+  return reduceRefinedMapResultsHierarchical(
+    mapResults,
+    sourceParagraphIds,
+    provider,
+    signal,
+    context,
+    outputLanguage,
+  )
+}
+
+/** Max map results sent to a single reduce call. Larger sets are tree-reduced. */
+export const MAX_REDUCE_BATCH_SIZE = 8
+
+async function reduceRefinedMapResultsHierarchical(
+  mapResults: MapResult[],
+  sourceParagraphIds: string[],
+  provider: ModelProvider,
+  signal?: AbortSignal,
+  context?: ModelCallContext,
+  outputLanguage: OutputLanguage = 'zh',
+): Promise<RefinedDocument> {
+  if (mapResults.length <= MAX_REDUCE_BATCH_SIZE) {
+    return reduceRefinedMapResultsOnce(
+      mapResults,
+      sourceParagraphIds,
+      provider,
+      signal,
+      context,
+      outputLanguage,
+    )
+  }
+
+  const intermediates: MapResult[] = []
+  for (let offset = 0; offset < mapResults.length; offset += MAX_REDUCE_BATCH_SIZE) {
+    const batch = mapResults.slice(offset, offset + MAX_REDUCE_BATCH_SIZE)
+    // Intermediate layers only need a complete document; skip live preview noise.
+    const document = await reduceRefinedMapResultsOnce(
+      batch,
+      sourceParagraphIds,
+      provider,
+      signal,
+      undefined,
+      outputLanguage,
+    )
+    intermediates.push(refinedDocumentToMapResult(document))
+  }
+
+  return reduceRefinedMapResultsHierarchical(
+    intermediates,
+    sourceParagraphIds,
+    provider,
+    signal,
+    context,
+    outputLanguage,
+  )
+}
+
+export function refinedDocumentToMapResult(document: RefinedDocument): MapResult {
+  return {
+    chapterCandidates: document.chapters.map((chapter) => ({
+      title: chapter.title,
+      sourceParagraphIds: chapter.sourceParagraphIds,
+    })),
+    claims: document.coreIdeas.map((text) => ({
+      text,
+      sourceParagraphIds: [],
+    })),
+    facts: document.importantFacts,
+    people: [],
+    // Carry chapter prose forward so intermediate reduce layers do not discard note body.
+    examples: document.chapters.map((chapter) => ({
+      text: chapter.body.trim().length > 0
+        ? `${chapter.title}\n\n${chapter.body}`
+        : chapter.title,
+      sourceParagraphIds: chapter.sourceParagraphIds,
+    })),
+    conclusions: [
+      ...(document.overview
+        ? [{ text: document.overview, sourceParagraphIds: [] as string[] }]
+        : []),
+      ...(document.conclusion
+        ? [{ text: document.conclusion, sourceParagraphIds: [] as string[] }]
+        : []),
+    ],
+  }
+}
+
+async function reduceRefinedMapResultsOnce(
+  mapResults: MapResult[],
+  sourceParagraphIds: string[],
+  provider: ModelProvider,
+  signal?: AbortSignal,
+  context?: ModelCallContext,
+  outputLanguage: OutputLanguage = 'zh',
+): Promise<RefinedDocument> {
   const validSourceIds = new Set(sourceParagraphIds)
   const reduceRequest: ModelRequest = {
     messages: [

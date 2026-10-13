@@ -9,17 +9,21 @@ export default defineConfig({
     },
   }),
   manifest: {
-    minimum_chrome_version: '114',
+    minimum_chrome_version: '116',
     name: 'Video to Markdown',
-    description: 'Convert existing YouTube and Bilibili subtitles into Chinese or English Markdown.',
-    permissions: ['sidePanel', 'storage', 'downloads'],
+    description: 'Convert video subtitles or current-tab audio into Chinese or English Markdown.',
+    permissions: ['sidePanel', 'storage', 'downloads', 'activeTab', 'tabCapture', 'offscreen'],
     host_permissions: [
       'https://www.youtube.com/*',
       'https://www.bilibili.com/*',
       'https://api.bilibili.com/*',
       'https://*.hdslb.com/*',
     ],
-    optional_host_permissions: ['https://*/*'],
+    optional_host_permissions: [
+      'https://*/*',
+      'http://localhost/*',
+      'http://127.0.0.1/*',
+    ],
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',
