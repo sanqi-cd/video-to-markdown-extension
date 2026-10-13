@@ -11,6 +11,7 @@ export const BridgeEventSchema: z.ZodType<BridgePayload> = z.object({
   tracks: z.array(
     z.object({
       baseUrl: z.string().url(),
+      alternateBaseUrls: z.array(z.string().url()).optional(),
       languageCode: z.string().min(1),
       label: z.string(),
       vssId: z.string(),

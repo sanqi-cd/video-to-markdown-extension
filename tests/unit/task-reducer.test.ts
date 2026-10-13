@@ -161,4 +161,46 @@ describe('taskReducer', () => {
     expect(active.modelConnectedChunkIndex).toBeUndefined()
     expect(active.metrics.receivedChars).toBe(0)
   })
+
+  it('clears unfinished stream content when a chunk restarts or is cleared', () => {
+    const withPartial = reduce(
+      start(),
+      {
+        type: 'PARAGRAPHS_READY',
+        taskId: 'task-current',
+        paragraphCount: 2,
+        chunkCount: 2,
+      },
+      {
+        type: 'CONTENT_APPENDED',
+        taskId: 'task-current',
+        chunkId: 'chunk-0',
+        chunkIndex: 0,
+        content: [{ id: 'p1', startMs: 0, endMs: 1, text: '半成品' }],
+      },
+      {
+        type: 'CONTENT_APPENDED',
+        taskId: 'task-current',
+        chunkId: 'chunk-1',
+        chunkIndex: 1,
+        content: [{ id: 'p2', startMs: 2, endMs: 3, text: '保留' }],
+      },
+    )
+
+    const restarted = taskReducer(withPartial, {
+      type: 'CHUNK_STARTED',
+      taskId: 'task-current',
+      chunkId: 'chunk-0',
+      chunkIndex: 0,
+      totalChunks: 2,
+    })
+    expect(restarted.completedChunks.map((chunk) => chunk.id)).toEqual(['chunk-1'])
+
+    const cleared = taskReducer(withPartial, {
+      type: 'CONTENT_CLEARED',
+      taskId: 'task-current',
+      chunkId: 'chunk-0',
+    })
+    expect(cleared.completedChunks.map((chunk) => chunk.id)).toEqual(['chunk-1'])
+  })
 })

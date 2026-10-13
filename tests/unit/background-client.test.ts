@@ -101,7 +101,7 @@ describe('BackgroundModelClient', () => {
 
     await expect(completion).rejects.toMatchObject({ code: 'TASK_CANCELLED' })
     expect(port.posted).toContainEqual({ type: 'CANCEL', taskId, requestId })
-    expect(port.disconnected).toBe(true)
+    expect(port.disconnected).toBe(false)
   })
 
   it('rejects and discards partial stream data when the Port disconnects after a delta', async () => {
@@ -117,6 +117,48 @@ describe('BackgroundModelClient', () => {
     await expect(completion).rejects.toMatchObject({
       code: 'NETWORK_FAILED',
       message: expect.stringContaining('未验证内容已丢弃'),
+    })
+  })
+
+  it('falls back to sendMessage when the Port drops before START is acknowledged', async () => {
+    const port = new MockPort()
+    const sendMessage = vi.fn().mockResolvedValue({
+      success: true,
+      data: { content: '{"fallback":true}' },
+    })
+    const completion = new BackgroundModelClient({
+      connect: () => port,
+      sendMessage,
+      randomUUID: () => requestId,
+    }).complete(request, undefined, { taskId, chunkIndex: 0 })
+
+    port.emitDisconnect()
+
+    await expect(completion).resolves.toEqual({ content: '{"fallback":true}' })
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'MODEL_COMPLETE_REQUEST',
+      requestId,
+      messages: request.messages,
+    })
+  })
+
+  it('explains an unexpected disconnect before the worker acknowledges START', async () => {
+    const port = new MockPort()
+    const completion = new BackgroundModelClient({
+      connect: () => port,
+      sendMessage: vi.fn().mockResolvedValue({
+        success: false,
+        error: '后台不可用',
+        code: 'NETWORK_FAILED',
+      }),
+      randomUUID: () => requestId,
+      runtimeLastError: () => 'The page keeping the extension port is now unloaded.',
+    }).complete(request, undefined, { taskId, chunkIndex: 0 })
+
+    port.emitDisconnect()
+
+    await expect(completion).rejects.toMatchObject({
+      code: 'NETWORK_FAILED',
     })
   })
 

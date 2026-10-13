@@ -78,8 +78,27 @@ describe('video context state views', () => {
         }}
       />,
     )
-    expect(screen.getByRole('heading', { name: '这个视频没有可用字幕' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: '未找到可直接提取的字幕' })).toBeVisible()
     expect(screen.getByText(/不会调用模型生成字幕/)).toBeVisible()
     expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument()
+  })
+
+  it('keeps the exact YouTube source input under other recovery methods', async () => {
+    const user = userEvent.setup()
+    render(
+      <NoSubtitleView
+        metadata={{
+          platform: 'bilibili',
+          videoId: 'BV1manual123',
+          title: 'B站转载视频',
+          canonicalUrl: 'https://www.bilibili.com/video/BV1manual123',
+        }}
+        onManualYouTubeSource={async () => {}}
+      />,
+    )
+
+    await user.click(screen.getByText('不发送音频的其他方式'))
+    expect(screen.getByRole('textbox', { name: 'YouTube 原视频链接' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '读取字幕' })).toBeDisabled()
   })
 })

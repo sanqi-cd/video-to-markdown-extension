@@ -40,6 +40,10 @@ if (!globalThis.chrome) {
     runtime: {
       getURL: (path: string) => `chrome-extension://test/${path}`,
       sendMessage: () => Promise.reject(new Error('chrome.runtime not available in test')),
+      onMessage: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
     },
     permissions: {
       request: () => Promise.resolve(true),

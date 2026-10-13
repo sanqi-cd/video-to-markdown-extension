@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PrepareView } from './PrepareView'
+import { preflightSubtitleTracks } from '../browser/subtitle-preflight'
 import { GeneratingView } from './GeneratingView'
 import { PartialResultView } from './PartialResultView'
 import { ResultView, ErrorView } from './ResultView'
@@ -24,6 +25,7 @@ import {
 } from '../core/product-state'
 import { YouTubeAdapter } from '../adapters/youtube/adapter'
 import { BilibiliAdapter } from '../adapters/bilibili/adapter'
+import { parseYouTubeVideoUrl } from '../adapters/shared/youtube-video-id'
 import {
   activeTabIdentity,
   getActiveTabSnapshot,
@@ -49,14 +51,27 @@ import type { TaskState, StartRequest } from '../core/orchestrator'
 import type {
   SubtitleAdapter,
   ModelProvider,
+  VideoMetadata,
 } from '../core/contracts'
 import {
   preferredSubtitleTrack,
   type OutputLanguage,
 } from '../core/language'
+import {
+  createTranscriptionConfigStore,
+  normalizeTranscriptionConfig,
+  requestTranscriptionOrigin,
+  type TranscriptionConfigStore,
+} from '../transcription/config-store'
+import type { TranscriptionConfig } from '../transcription/contracts'
+import { isTranscriptionActive } from '../transcription/ui-state'
+import { useTabTranscription, type CompletedTranscription } from '../hooks/use-tab-transcription'
+
+let sharedModelClient: BackgroundModelClient | null = null
 
 function createBackgroundProvider(): ModelProvider {
-  return new BackgroundModelClient()
+  sharedModelClient ??= new BackgroundModelClient()
+  return sharedModelClient
 }
 
 async function loadYoutubeCaption(tabId: number, trackId: string): Promise<Response> {
@@ -83,15 +98,20 @@ function publicModelError(error: unknown): PublicAppError {
 
 export function App() {
   const configStore = useRef<ModelConfigStore | null>(null)
+  const transcriptionConfigStore = useRef<TranscriptionConfigStore | null>(null)
   const preferencesStore = useRef<ReturnType<typeof createPreferencesStore> | null>(null)
   if (configStore.current === null) {
     configStore.current = createConfigStore(chrome.storage.local)
+  }
+  if (transcriptionConfigStore.current === null) {
+    transcriptionConfigStore.current = createTranscriptionConfigStore(chrome.storage.local)
   }
   if (preferencesStore.current === null) {
     preferencesStore.current = createPreferencesStore(chrome.storage.local)
   }
 
   const [config, setConfig] = useState<ModelConfig | null>(null)
+  const [transcriptionConfig, setTranscriptionConfig] = useState<TranscriptionConfig | null>(null)
   const adapterRef = useRef<SubtitleAdapter | null>(null)
   const orchestratorRef = useRef<TaskOrchestrator | null>(null)
   const orchestratorUnsubscribeRef = useRef<(() => void) | null>(null)
@@ -122,6 +142,37 @@ export function App() {
   const [includeTimestamps, setIncludeTimestamps] = useState(false)
   const [sourceLanguage, setSourceLanguage] = useState('zh')
 
+  const handleTranscriptionCompleted = useCallback((
+    event: CompletedTranscription,
+    metadata: VideoMetadata,
+  ) => {
+    const adapter = adapterRef.current
+    if (!(adapter instanceof BilibiliAdapter)) {
+      throw new AppError('TASK_CANCELLED', '转写完成时视频页面已经切换，请在原视频重新开始')
+    }
+    const track = adapter.registerTranscription(
+      event.taskId,
+      event.cues,
+      event.language,
+      event.recordedMs,
+      event.stoppedEarly,
+    )
+    setSelectedTrackId(track.id)
+    setTrackSelection(track.id)
+    setSourceLanguage(track.language)
+    setIncludeTimestamps(true)
+    setTaskState(null)
+    setVideoContext({ status: 'ready', metadata, tracks: [track] })
+  }, [])
+
+  const transcription = useTabTranscription({ onCompleted: handleTranscriptionCompleted })
+  const {
+    state: transcriptionState,
+    stop: handleStopTranscription,
+    reset: resetTranscription,
+  } = transcription
+  const transcriptionRunning = isTranscriptionActive(transcriptionState)
+
   const loadVideoContextForTab = useCallback(async (tab: ActiveTabSnapshot) => {
     const loadId = contextLoadIdRef.current + 1
     contextLoadIdRef.current = loadId
@@ -150,17 +201,21 @@ export function App() {
       } else {
         adapter = new BilibiliAdapter(context.data)
       }
+      // Keep the page-scoped adapter available when the only failure is NO_SUBTITLE,
+      // so the user can attach an exact YouTube source without re-reading the page.
+      adapterRef.current = adapter
 
       metadata = await adapter.getVideoMetadata()
       if (contextLoadIdRef.current !== loadId) return
-      const tracks = await adapter.getSubtitleTracks()
+      const discoveredTracks = await adapter.getSubtitleTracks()
+      const tracks = await preflightSubtitleTracks(adapter, metadata, discoveredTracks,
+        () => contextLoadIdRef.current === loadId)
       if (contextLoadIdRef.current !== loadId) return
       const manuallySelected = tracks.find(
         (track) => track.id === preferencesRef.current.selectedTrackId,
       )
       const selected = manuallySelected
         ?? preferredSubtitleTrack(tracks, preferencesRef.current.outputLanguage)
-      adapterRef.current = adapter
       setSourceLanguage(selected?.language ?? 'zh')
       setSelectedTrackId(selected?.id ?? '')
       setTrackSelection(manuallySelected?.id ?? 'auto')
@@ -184,8 +239,9 @@ export function App() {
 
   useEffect(() => {
     void (async () => {
-      const [savedConfig, preferences] = await Promise.all([
+      const [savedConfig, savedTranscriptionConfig, preferences] = await Promise.all([
         configStore.current!.get(),
+        transcriptionConfigStore.current!.get(),
         preferencesStore.current!.get(),
       ])
       preferencesRef.current = preferences
@@ -194,15 +250,14 @@ export function App() {
       setOutputLanguage(preferences.outputLanguage)
       setPreferredProviderId(preferences.lastProviderId)
       setConfig(savedConfig)
+      setTranscriptionConfig(savedTranscriptionConfig)
       setIsInitialized(true)
     })()
   }, [])
 
-  useEffect(() => {
-    return () => {
-      orchestratorUnsubscribeRef.current?.()
-      orchestratorRef.current?.cancel()
-    }
+  useEffect(() => () => {
+    orchestratorUnsubscribeRef.current?.()
+    orchestratorRef.current?.cancel()
   }, [])
 
   const handleActiveTabChange = useCallback((nextTab: ActiveTabSnapshot) => {
@@ -215,13 +270,13 @@ export function App() {
     }
     if (ignoredTabIdentityRef.current === nextIdentity) return
 
-    const hasTask = taskState !== null
+    const hasTask = taskState !== null || transcriptionRunning
     if (shouldConfirmTabSwitch(currentTab, nextTab, hasTask)) {
       setPendingTab(nextTab)
       return
     }
     void loadVideoContextForTab(nextTab)
-  }, [loadVideoContextForTab, taskState])
+  }, [loadVideoContextForTab, taskState, transcriptionRunning])
 
   const handleActiveTabError = useCallback((error: unknown) => {
     setVideoContext(mapVideoContextError(error, { tabId: -1 }))
@@ -378,6 +433,102 @@ export function App() {
     void preferencesStore.current!.set({ includeTimestamps: enabled })
   }, [])
 
+  const handleManualYouTubeSource = useCallback(async (url: string) => {
+    const videoId = parseYouTubeVideoUrl(url)
+    if (!videoId) {
+      throw new AppError(
+        'SUBTITLE_EXTRACTION_FAILED',
+        '请输入有效的 HTTPS YouTube 视频链接，例如 https://www.youtube.com/watch?v=...',
+      )
+    }
+    const adapter = adapterRef.current
+    if (!(adapter instanceof BilibiliAdapter)) {
+      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '当前页面不是可关联原视频的 B 站视频')
+    }
+
+    const tracks = await adapter.useManualYouTubeSource(videoId)
+    if (adapterRef.current !== adapter) {
+      throw new AppError('TASK_CANCELLED', '检测期间视频页面已切换，请重新填写原视频链接')
+    }
+    const manualTracks = tracks.filter((track) => track.id.startsWith(`yt:${videoId}:`))
+    const selected = preferredSubtitleTrack(manualTracks, outputLanguage)
+      ?? manualTracks[0]
+    if (!selected) {
+      throw new AppError('NO_SUBTITLE', '这个 YouTube 原视频没有可选择的字幕轨道')
+    }
+    const metadata = videoContext.status === 'ready' || videoContext.status === 'no-subtitle'
+      ? videoContext.metadata
+      : await adapter.getVideoMetadata()
+
+    setSelectedTrackId(selected.id)
+    setTrackSelection(selected.id)
+    setSourceLanguage(selected.language)
+    preferencesRef.current.selectedTrackId = selected.id
+    void preferencesStore.current!.set({ selectedTrackId: selected.id })
+    setTaskState(null)
+    setVideoContext({ status: 'ready', metadata, tracks })
+  }, [outputLanguage, videoContext])
+
+  const handleDiscoverPublisherTranscript = useCallback(async () => {
+    const adapter = adapterRef.current
+    if (!(adapter instanceof BilibiliAdapter)) {
+      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '当前页面不是可查找发布者文稿的 B 站视频')
+    }
+    const result = await adapter.discoverPublisherTranscript()
+    if (adapterRef.current !== adapter) {
+      throw new AppError('TASK_CANCELLED', '查找期间视频页面已切换，请在当前视频重新查找')
+    }
+    if (result.status !== 'loaded') return result
+
+    const tracks = await adapter.getSubtitleTracks()
+    if (adapterRef.current !== adapter) {
+      throw new AppError('TASK_CANCELLED', '加载文稿期间视频页面已切换，请重新查找')
+    }
+    const selected = tracks.find((track) => track.sourceKind === 'publisher-transcript')
+    if (!selected) {
+      throw new AppError('SUBTITLE_EXTRACTION_FAILED', '发布者文稿已发现，但没有生成可用的文稿来源')
+    }
+    const metadata = videoContext.status === 'ready' || videoContext.status === 'no-subtitle'
+      ? videoContext.metadata
+      : await adapter.getVideoMetadata()
+
+    setSelectedTrackId(selected.id)
+    setTrackSelection(selected.id)
+    setSourceLanguage(selected.language)
+    setIncludeTimestamps(false)
+    setTaskState(null)
+    setVideoContext({ status: 'ready', metadata, tracks })
+    return result
+  }, [videoContext])
+
+  const handleSaveTranscriptionConfig = useCallback(async (rawConfig: TranscriptionConfig) => {
+    const normalized = normalizeTranscriptionConfig(rawConfig)
+    const granted = await requestTranscriptionOrigin(
+      normalized.endpoint,
+      (permissions) => chrome.permissions.request(permissions),
+    )
+    if (!granted) {
+      throw new AppError('INVALID_TRANSCRIPTION_CONFIG', '需要授权访问语音转写 API 域名才能继续')
+    }
+    await transcriptionConfigStore.current!.set(normalized)
+    setTranscriptionConfig(normalized)
+  }, [])
+
+  const handleDeleteTranscriptionConfig = useCallback(async () => {
+    await transcriptionConfigStore.current!.clear()
+    setTranscriptionConfig(null)
+  }, [])
+
+  const startTranscription = transcription.start
+  const handleStartTranscription = useCallback(async () => {
+    const tab = currentTabRef.current
+    const adapter = adapterRef.current
+    if (!tab || !(adapter instanceof BilibiliAdapter) || videoContext.status !== 'no-subtitle') {
+      throw new AppError('TRANSCRIPTION_CAPTURE_FAILED', '当前页面不是可直接转录的 B 站无字幕视频')
+    }
+    await startTranscription(tab.tabId, videoContext.metadata)
+  }, [startTranscription, videoContext])
+
   const handleStart = useCallback(() => {
     const adapter = adapterRef.current
     if (!adapter || videoContext.status !== 'ready') return
@@ -397,10 +548,11 @@ export function App() {
       mode,
       sourceLanguage,
       outputLanguage,
-      includeTimestamps,
+      includeTimestamps: includeTimestamps
+        && videoContext.tracks.find((track) => track.id === selectedTrackId)?.hasTimestamps !== false,
       maxInputChars: Math.max(
-        4_000,
-        Math.min(12_000, Math.floor((config?.contextWindow ?? 32_000) / 4)),
+        2_000,
+        Math.min(4_000, Math.floor((config?.contextWindow ?? 32_000) / 8)),
       ),
     }
     void orchestrator.start(request)
@@ -463,11 +615,12 @@ export function App() {
     orchestratorRef.current?.cancel()
     orchestratorRef.current = null
     setTaskState(null)
+    resetTranscription()
     ignoredTabIdentityRef.current = null
     const nextTab = pendingTab
     setPendingTab(null)
     void loadVideoContextForTab(nextTab)
-  }, [loadVideoContextForTab, pendingTab])
+  }, [loadVideoContextForTab, pendingTab, resetTranscription])
 
   const hasPreservedContent = taskState?.completedChunks.some(
     (chunk) => chunk.content !== undefined,
@@ -511,7 +664,19 @@ export function App() {
         </BottomActionBar>
       )
     }
-    if (page === 'no-subtitle' || page === 'video-error') {
+    if (
+      page === 'no-subtitle'
+      && !transcriptionRunning
+    ) {
+      return (
+        <BottomActionBar>
+          <Button variant="secondary" fullWidth onClick={() => void detectCurrentTab()}>
+            重新检测
+          </Button>
+        </BottomActionBar>
+      )
+    }
+    if (page === 'video-error') {
       return (
         <BottomActionBar>
           <Button variant="primary" fullWidth onClick={() => void detectCurrentTab()}>
@@ -586,7 +751,7 @@ export function App() {
           tone="loading"
           icon={<span className="loading-indicator" />}
           title="正在检测当前页面"
-          description="正在读取视频信息和可用字幕…"
+          description="正在读取视频信息，并检查字幕内容与时间覆盖；不会刷新视频网页或调用模型。"
         />
       )}
 
@@ -599,14 +764,26 @@ export function App() {
       )}
 
       {page === 'no-subtitle' && videoContext.status === 'no-subtitle' && (
-        <NoSubtitleView metadata={videoContext.metadata} />
+        <NoSubtitleView
+          metadata={videoContext.metadata}
+          reason={videoContext.reason}
+          onRedetect={transcriptionRunning ? undefined : () => void detectCurrentTab()}
+          onDiscoverPublisherTranscript={handleDiscoverPublisherTranscript}
+          onManualYouTubeSource={handleManualYouTubeSource}
+          transcriptionConfig={transcriptionConfig}
+          transcriptionState={transcriptionState}
+          onSaveTranscriptionConfig={handleSaveTranscriptionConfig}
+          onDeleteTranscriptionConfig={handleDeleteTranscriptionConfig}
+          onStartTranscription={handleStartTranscription}
+          onStopTranscription={handleStopTranscription}
+        />
       )}
 
       {page === 'video-error' && videoContext.status === 'failed' && (
         <div className="state-stack">
           <div className="section-heading">
             <h2>读取视频失败</h2>
-            <p>没有修改当前设置，可以安全重试。</p>
+            <p>暂时无法完成检测，不代表视频没有字幕。没有修改当前设置，可以安全重试。</p>
           </div>
           <ErrorView error={videoContext.error} />
         </div>
@@ -615,6 +792,7 @@ export function App() {
       {page === 'ready' && videoContext.status === 'ready' && (
         <PrepareView
           metadata={videoContext.metadata}
+          onRedetect={() => void detectCurrentTab()}
           tracks={videoContext.tracks}
           selectedTrackId={selectedTrackId}
           trackSelection={trackSelection}
@@ -626,6 +804,7 @@ export function App() {
           onModeChange={handleModeChange}
           onTimestampsChange={handleTimestampsChange}
           onStart={handleStart}
+          onManualYouTubeSource={handleManualYouTubeSource}
           showAction={false}
           modelStatus={modelConnectionStatus}
         />

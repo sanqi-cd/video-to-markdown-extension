@@ -1,6 +1,7 @@
 export async function* parseSSEStream(
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  onBytes?: () => void,
 ): AsyncGenerator<string> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -32,6 +33,7 @@ export async function* parseSSEStream(
       if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
       const { done, value } = await reader.read()
       if (done) break
+      if (value.byteLength > 0) onBytes?.()
       buffer += decoder.decode(value, { stream: true })
       let newline = buffer.indexOf('\n')
       while (newline >= 0) {

@@ -121,6 +121,10 @@ export type TaskEvent =
       content: unknown
     })
   | (TaskEventBase & {
+      type: 'CONTENT_CLEARED'
+      chunkId: string
+    })
+  | (TaskEventBase & {
       type: 'CHUNK_RETRYING'
       chunkId: string
       chunkIndex: number

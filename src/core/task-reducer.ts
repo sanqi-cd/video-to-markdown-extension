@@ -91,7 +91,10 @@ export function taskReducer(state: TaskSnapshot, event: TaskEvent): TaskSnapshot
           totalChunks: event.chunkCount,
         },
       }
-    case 'CHUNK_STARTED':
+    case 'CHUNK_STARTED': {
+      const completedChunks = state.completedChunks.filter(
+        (chunk) => chunk.id !== event.chunkId,
+      )
       return {
         ...state,
         status: 'running',
@@ -100,14 +103,34 @@ export function taskReducer(state: TaskSnapshot, event: TaskEvent): TaskSnapshot
           : 'processing-high-fidelity',
         retry: undefined,
         modelConnectedChunkIndex: undefined,
+        completedChunks,
         failedChunks: state.failedChunks.filter((chunk) => chunk.id !== event.chunkId),
         metrics: {
           ...state.metrics,
           currentChunkIndex: event.chunkIndex,
           totalChunks: event.totalChunks,
           receivedChars: 0,
+          completedChunks: completedChunks.filter(
+            (chunk) => chunk.index < event.totalChunks,
+          ).length,
         },
       }
+    }
+    case 'CONTENT_CLEARED': {
+      const completedChunks = state.completedChunks.filter(
+        (chunk) => chunk.id !== event.chunkId,
+      )
+      return {
+        ...state,
+        completedChunks,
+        metrics: {
+          ...state.metrics,
+          completedChunks: completedChunks.filter(
+            (chunk) => chunk.index < state.metrics.totalChunks,
+          ).length,
+        },
+      }
+    }
     case 'MODEL_CONNECTED':
       return { ...state, modelConnectedChunkIndex: event.chunkIndex }
     case 'STREAM_ACTIVITY':

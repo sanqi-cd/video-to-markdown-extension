@@ -18,7 +18,11 @@ const ErrorCodeSchema = z.enum([
   'PAGE_CONTEXT_INVALID',
   'TAB_RELOAD_TIMEOUT',
   'NO_SUBTITLE',
+  'SUBTITLE_UNRELIABLE',
   'SUBTITLE_EXTRACTION_FAILED',
+  'INVALID_TRANSCRIPTION_CONFIG',
+  'TRANSCRIPTION_CAPTURE_FAILED',
+  'TRANSCRIPTION_FAILED',
   'INVALID_MODEL_CONFIG',
   'MODEL_AUTH_FAILED',
   'MODEL_RATE_LIMITED',
@@ -39,6 +43,9 @@ const StreamCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('CANCEL'),
     taskId: z.string().uuid(),
     requestId: z.string().uuid(),
+  }),
+  z.object({
+    type: z.literal('PING'),
   }),
 ])
 
@@ -72,6 +79,9 @@ const StreamEventSchema = z.discriminatedUnion('type', [
     requestId: z.string().uuid(),
     error: z.object({ code: ErrorCodeSchema, message: z.string() }),
   }),
+  z.object({
+    type: z.literal('PONG'),
+  }),
 ])
 
 export type StreamCommand = z.infer<typeof StreamCommandSchema>
@@ -92,7 +102,7 @@ type ListenerSet<T> = {
 
 export type RuntimePortLike = {
   name: string
-  sender?: { url?: string }
+  sender?: { url?: string; id?: string; origin?: string }
   onMessage: ListenerSet<unknown>
   onDisconnect: ListenerSet<RuntimePortLike>
   postMessage(message: unknown): void
@@ -101,7 +111,7 @@ export type RuntimePortLike = {
 
 type StreamPortDeps = {
   configStore: ModelConfigStore
-  isExtensionOrigin: (sender: { url?: string }) => boolean
+  isExtensionOrigin: (sender: { url?: string; id?: string; origin?: string }) => boolean
   createProvider: (config: ModelConfig) => ModelProvider
 }
 
@@ -134,7 +144,12 @@ export function createStreamPortHandler(deps: StreamPortDeps) {
     const active = new Map<string, ActiveStream>()
     let disconnected = false
     const post = (event: StreamEvent) => {
-      if (!disconnected) port.postMessage(StreamEventSchema.parse(event))
+      if (disconnected) return
+      try {
+        port.postMessage(StreamEventSchema.parse(event))
+      } catch {
+        disconnected = true
+      }
     }
 
     const handleStart = async (
@@ -192,6 +207,10 @@ export function createStreamPortHandler(deps: StreamPortDeps) {
       try {
         command = parseStreamCommand(raw)
       } catch {
+        return
+      }
+      if (command.type === 'PING') {
+        post({ type: 'PONG' })
         return
       }
       if (command.type === 'START') {

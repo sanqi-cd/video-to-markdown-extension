@@ -53,8 +53,12 @@ test('loads the built extension and renders its side panel', async ({ browserNam
     expect(await hasHorizontalOverflow(sidePanel)).toBe(false)
     await sidePanel.setViewportSize({ width: 600, height: 760 })
     expect(await hasHorizontalOverflow(sidePanel)).toBe(false)
-    expect((await sidePanel.locator('.app-shell__content > *').first().boundingBox())?.width)
-      .toBeLessThanOrEqual(520)
+    await expect.poll(() => sidePanel.locator('.app-shell__content').evaluate((content) => {
+      const surface = Array.from(content.children).find((child) => (
+        child.getBoundingClientRect().width > 0
+      ))
+      return surface?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY
+    })).toBeLessThanOrEqual(520)
     await sidePanel.setViewportSize({ width: 380, height: 760 })
 
     await context.route('https://www.youtube.com/watch**', (route) => route.fulfill({

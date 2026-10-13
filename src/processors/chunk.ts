@@ -10,13 +10,18 @@ export type ParagraphChunk = {
 export type ChunkOptions = {
   maxInputChars: number
   overlapParagraphs: number
+  /** Split when a chunk's subtitle time span exceeds this, even if under the char budget. */
+  maxSpanMs?: number
 }
+
+/** Default cap so a long interview is never one giant model request. */
+export const DEFAULT_MAX_SPAN_MS = 180_000
 
 export function chunkParagraphs(
   paragraphs: SubtitleParagraph[],
   options: ChunkOptions,
 ): ParagraphChunk[] {
-  const { maxInputChars, overlapParagraphs } = options
+  const { maxInputChars, overlapParagraphs, maxSpanMs } = options
 
   // Validate: no single paragraph exceeds the budget
   for (const p of paragraphs) {
@@ -34,9 +39,12 @@ export function chunkParagraphs(
 
   for (let i = 0; i < paragraphs.length; i += 1) {
     const p = paragraphs[i]!
+    const spanWouldExceed = maxSpanMs !== undefined
+      && current.length > 0
+      && (p.endMs - current[0]!.startMs > maxSpanMs)
 
     // Check if adding this paragraph would exceed budget
-    if (currentChars + p.text.length > maxInputChars && current.length > 0) {
+    if ((currentChars + p.text.length > maxInputChars || spanWouldExceed) && current.length > 0) {
       chunks.push({
         id: `chunk-${chunks.length}`,
         paragraphs: current,

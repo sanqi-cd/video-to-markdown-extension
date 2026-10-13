@@ -56,6 +56,15 @@ describe('timestampUrl', () => {
       'https://www.bilibili.com/video/BV123?t=1',
     )
   })
+
+  it('preserves the Bilibili part when generating timestamp URLs', () => {
+    expect(timestampUrl(
+      'bilibili',
+      'BV123',
+      1500,
+      'https://www.bilibili.com/video/BV123?p=2',
+    )).toBe('https://www.bilibili.com/video/BV123?p=2&t=1')
+  })
 })
 
 describe('sanitizeFilename', () => {

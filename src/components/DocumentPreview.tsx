@@ -55,6 +55,7 @@ function renderHighFidelity(document: ProcessedDocument, includeTimestamps: bool
                 document.metadata.platform,
                 document.metadata.videoId,
                 paragraph.startMs,
+                document.metadata.canonicalUrl,
               )}
               target="_blank"
               rel="noreferrer"

@@ -71,7 +71,7 @@ function ModelStatusBadge({
 }: {
   status: ModelConnectionStatus
 }) {
-  if (status === 'connected') return <StatusBadge tone="success">模型已连接</StatusBadge>
-  if (status === 'configured') return <StatusBadge tone="warning">模型已配置 · 未测试</StatusBadge>
-  return <StatusBadge tone="warning">模型未配置</StatusBadge>
+  if (status === 'connected') return <StatusBadge tone="success">文档处理模型已连接</StatusBadge>
+  if (status === 'configured') return <StatusBadge tone="warning">文档处理模型已配置 · 未测试</StatusBadge>
+  return <StatusBadge tone="warning">文档处理模型未配置</StatusBadge>
 }

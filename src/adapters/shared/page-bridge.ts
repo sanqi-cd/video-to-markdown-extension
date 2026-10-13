@@ -1,4 +1,6 @@
-export const PAGE_BRIDGE_VERSION = 1
+// Increment whenever a page-context payload becomes incompatible. Version 2
+// adds the required Bilibili multi-part page identity.
+export const PAGE_BRIDGE_VERSION = 2
 
 export interface BridgePayload {
   videoId: string
@@ -9,6 +11,8 @@ export interface BridgePayload {
   }
   tracks: Array<{
     baseUrl: string
+    /** Alternate URLs for the same track obtained from other official player clients. */
+    alternateBaseUrls?: string[]
     languageCode: string
     label: string
     vssId: string

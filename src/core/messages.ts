@@ -28,7 +28,7 @@ export function parseExtensionMessage(input: unknown): ExtensionMessage {
 
 // --- Message Router ---
 
-type Sender = { url?: string }
+type Sender = { url?: string; id?: string; origin?: string }
 
 const PRIVILEGED = new Set([
   'MODEL_TEST_REQUEST',

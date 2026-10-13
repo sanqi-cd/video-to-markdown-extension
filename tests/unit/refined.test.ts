@@ -3,6 +3,8 @@ import {
   processRefined,
   processRefinedMapChunk,
   reduceRefinedMapResults,
+  refinedDocumentToMapResult,
+  MAX_REDUCE_BATCH_SIZE,
 } from '../../src/processors/refined'
 import type { SubtitleParagraph } from '../../src/processors/paragraphs'
 import type { ParagraphChunk } from '../../src/processors/chunk'
@@ -341,5 +343,71 @@ describe('refined structured streaming', () => {
       undefined,
       { taskId: 'task-1', chunkIndex: 1, onValidatedContent: vi.fn() },
     )).rejects.toMatchObject({ code: 'MODEL_RESPONSE_INVALID' })
+  })
+
+  it('tree-reduces large map result sets in batches', async () => {
+    const sourceIds = Array.from({ length: MAX_REDUCE_BATCH_SIZE + 2 }, (_, i) => `p${i}`)
+    const mapResults = sourceIds.map((id) => ({
+      chapterCandidates: [{ title: `章 ${id}`, sourceParagraphIds: [id] }],
+      claims: [],
+      facts: [],
+      people: [],
+      examples: [],
+      conclusions: [],
+    }))
+
+    const reduceResponseFor = (label: string) => ({
+      content: JSON.stringify({
+        overview: `${label} overview`,
+        coreIdeas: [`${label} idea`],
+        chapters: [{
+          title: label,
+          body: `${label} body prose`,
+          sourceParagraphIds: [sourceIds[0]!],
+        }],
+        importantFacts: [],
+        conclusion: `${label} conclusion`,
+      }),
+    })
+
+    const complete = vi.fn()
+      .mockResolvedValueOnce(reduceResponseFor('batch-0'))
+      .mockResolvedValueOnce(reduceResponseFor('batch-1'))
+      .mockResolvedValueOnce(reduceResponseFor('final'))
+
+    const result = await reduceRefinedMapResults(
+      mapResults,
+      sourceIds,
+      { complete, testConnection: vi.fn() } as ModelProvider,
+    )
+
+    expect(complete).toHaveBeenCalledTimes(3)
+    expect(result.overview).toBe('final overview')
+    expect(JSON.parse((complete.mock.calls[0]![0] as { messages: Array<{ content: string }> })
+      .messages[1]!.content).mapResults).toHaveLength(MAX_REDUCE_BATCH_SIZE)
+    const finalInput = JSON.parse(
+      (complete.mock.calls[2]![0] as { messages: Array<{ content: string }> }).messages[1]!.content,
+    ) as { mapResults: Array<{ examples: Array<{ text: string }> }> }
+    expect(finalInput.mapResults).toHaveLength(2)
+    expect(finalInput.mapResults[0]?.examples[0]?.text).toContain('batch-0 body prose')
+    expect(finalInput.mapResults[1]?.examples[0]?.text).toContain('batch-1 body prose')
+  })
+
+  it('converts refined documents back into map results for intermediate layers', () => {
+    const mapped = refinedDocumentToMapResult({
+      overview: '概览',
+      coreIdeas: ['观点'],
+      chapters: [{ title: '章', body: '正文', sourceParagraphIds: ['p1'] }],
+      importantFacts: [{ text: '事实', sourceParagraphIds: ['p1'] }],
+      conclusion: '结论',
+    })
+    expect(mapped.chapterCandidates).toEqual([
+      { title: '章', sourceParagraphIds: ['p1'] },
+    ])
+    expect(mapped.examples).toEqual([
+      { text: '章\n\n正文', sourceParagraphIds: ['p1'] },
+    ])
+    expect(mapped.claims[0]?.text).toBe('观点')
+    expect(mapped.conclusions.map((item) => item.text)).toEqual(['概览', '结论'])
   })
 })

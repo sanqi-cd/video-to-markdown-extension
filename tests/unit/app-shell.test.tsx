@@ -101,6 +101,8 @@ describe('side panel shell', () => {
     ).mockResolvedValue({
       success: true,
       bridgeVersion: PAGE_BRIDGE_VERSION,
+      status: 200,
+      body: JSON.stringify({ events: [{ tStartMs: 0, dDurationMs: 5000, segs: [{ utf8: 'English subtitle for preflight.' }] }] }),
       platform: 'youtube',
       data: {
         videoId: 'english-video',

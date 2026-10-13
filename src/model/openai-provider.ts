@@ -16,6 +16,13 @@ const STATUS_ERROR_MAP: Partial<Record<number, ErrorCode>> = {
 
 const STREAM_UNSUPPORTED_STATUSES = new Set([400, 404, 405, 415, 422, 501])
 
+/** Abort when no bytes / progress arrive for this long. */
+const DEFAULT_IDLE_TIMEOUT_MS = 90_000
+/** Hard cap for a single non-stream completion. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 180_000
+/** Hard cap for a single streamed completion (idle timeout still applies). */
+const DEFAULT_STREAM_ABSOLUTE_TIMEOUT_MS = 600_000
+
 export type StreamCallbacks = {
   onConnected: () => void
   onDelta: (text: string, receivedChars: number) => void
@@ -31,8 +38,7 @@ export interface StreamingModelProvider extends ModelProvider {
 
 type OpenRequest = {
   response: Response
-  timeoutController: AbortController
-  timeoutMs: number
+  timeout: RequestTimeout
   cleanup: () => void
 }
 
@@ -40,6 +46,66 @@ class StreamUnsupportedError extends Error {
   constructor(readonly status: number) {
     super(`stream unsupported (${status})`)
     this.name = 'StreamUnsupportedError'
+  }
+}
+
+class RequestTimeout {
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private absoluteTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly controller = new AbortController()
+  private cleared = false
+  private idleSuspended = false
+  private abortReason: 'idle' | 'absolute' | null = null
+
+  constructor(
+    private readonly idleMs: number,
+    private readonly absoluteMs: number,
+  ) {
+    this.absoluteTimer = setTimeout(() => this.abort('absolute'), absoluteMs)
+    this.bump()
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal
+  }
+
+  get idleMsValue(): number {
+    return this.idleMs
+  }
+
+  get absoluteMsValue(): number {
+    return this.absoluteMs
+  }
+
+  get reason(): 'idle' | 'absolute' | null {
+    return this.abortReason
+  }
+
+  bump(): void {
+    if (this.cleared || this.idleSuspended || this.controller.signal.aborted) return
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => this.abort('idle'), this.idleMs)
+  }
+
+  /** Keep the absolute cap, but do not idle-abort while reading a large body. */
+  suspendIdle(): void {
+    this.idleSuspended = true
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+  }
+
+  clear(): void {
+    this.cleared = true
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    if (this.absoluteTimer) clearTimeout(this.absoluteTimer)
+    this.idleTimer = null
+    this.absoluteTimer = null
+  }
+
+  private abort(reason: 'idle' | 'absolute'): void {
+    if (this.controller.signal.aborted) return
+    this.abortReason = reason
+    this.controller.abort()
   }
 }
 
@@ -59,7 +125,7 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
     await this.sendRequest(
       [{ role: 'user', content: 'ping' }],
       signal,
-      { timeoutMs: 15_000, maxTokens: 16 },
+      { idleTimeoutMs: 15_000, absoluteTimeoutMs: 60_000, maxTokens: 16 },
     )
   }
 
@@ -99,19 +165,22 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
     messages: ModelRequest['messages'],
     signal?: AbortSignal,
     options: {
-      timeoutMs?: number
+      idleTimeoutMs?: number
+      absoluteTimeoutMs?: number
       maxTokens?: number
       onConnected?: () => void
     } = {},
   ): Promise<ModelResponse> {
     const opened = await this.openRequest(messages, signal, {
-      timeoutMs: options.timeoutMs,
+      idleTimeoutMs: options.idleTimeoutMs,
+      absoluteTimeoutMs: options.absoluteTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       maxTokens: options.maxTokens,
       stream: false,
     })
     try {
       this.assertResponseOk(opened.response)
       options.onConnected?.()
+      opened.timeout.suspendIdle()
       let body: unknown
       try {
         body = await opened.response.json()
@@ -138,16 +207,21 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<ModelResponse> {
-    const opened = await this.openRequest(messages, signal, { stream: true })
+    const opened = await this.openRequest(messages, signal, {
+      absoluteTimeoutMs: DEFAULT_STREAM_ABSOLUTE_TIMEOUT_MS,
+      stream: true,
+    })
     try {
       if (!opened.response.ok && STREAM_UNSUPPORTED_STATUSES.has(opened.response.status)) {
         throw new StreamUnsupportedError(opened.response.status)
       }
       this.assertResponseOk(opened.response)
+      opened.timeout.bump()
       callbacks.onConnected()
 
       const contentType = opened.response.headers.get('content-type')?.toLowerCase() ?? ''
       if (!contentType.includes('text/event-stream')) {
+        opened.timeout.suspendIdle()
         let body: unknown
         try {
           body = await opened.response.json()
@@ -169,7 +243,11 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
       let content = ''
       let receivedChars = 0
       try {
-        for await (const data of parseSSEStream(opened.response.body, signal)) {
+        for await (const data of parseSSEStream(
+          opened.response.body,
+          signal,
+          () => opened.timeout.bump(),
+        )) {
           if (data === '[DONE]') break
           const delta = extractDelta(data)
           if (delta.length === 0) continue
@@ -195,18 +273,24 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
   private async openRequest(
     messages: ModelRequest['messages'],
     signal: AbortSignal | undefined,
-    options: { timeoutMs?: number; maxTokens?: number; stream: boolean },
+    options: {
+      idleTimeoutMs?: number
+      absoluteTimeoutMs?: number
+      maxTokens?: number
+      stream: boolean
+    },
   ): Promise<OpenRequest> {
     if (signal?.aborted) throw new AppError('TASK_CANCELLED', '任务已取消')
 
-    const timeoutMs = options.timeoutMs ?? 90_000
-    const timeoutController = new AbortController()
-    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs)
+    const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+    const absoluteTimeoutMs = options.absoluteTimeoutMs
+      ?? (options.stream ? DEFAULT_STREAM_ABSOLUTE_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS)
+    const timeout = new RequestTimeout(idleTimeoutMs, absoluteTimeoutMs)
     const combined = signal
-      ? combineSignals(signal, timeoutController.signal)
-      : { signal: timeoutController.signal, cleanup: () => {} }
+      ? combineSignals(signal, timeout.signal)
+      : { signal: timeout.signal, cleanup: () => {} }
     const cleanup = () => {
-      clearTimeout(timeoutId)
+      timeout.clear()
       combined.cleanup()
     }
 
@@ -229,17 +313,22 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
           signal: combined.signal,
         },
       )
-      return { response, timeoutController, timeoutMs, cleanup }
+      timeout.bump()
+      return { response, timeout, cleanup }
     } catch (error) {
       cleanup()
-      this.throwFetchError(error, timeoutController, signal, timeoutMs)
+      this.throwFetchError(error, timeout, signal)
     }
   }
 
   private assertResponseOk(response: Response): void {
     if (response.ok) return
     const code: ErrorCode = STATUS_ERROR_MAP[response.status] ?? 'NETWORK_FAILED'
-    throw new AppError(code, this.statusMessage(response.status))
+    throw new AppError(code, this.statusMessage(response.status), {
+      retryAfterMs: code === 'MODEL_RATE_LIMITED'
+        ? parseRetryAfterMs(response.headers.get('retry-after'))
+        : undefined,
+    })
   }
 
   private throwIfAborted(
@@ -248,22 +337,27 @@ export class OpenAICompatibleProvider implements StreamingModelProvider {
     signal?: AbortSignal,
   ): void {
     if ((error instanceof DOMException && error.name === 'AbortError')
-      || opened.timeoutController.signal.aborted
+      || opened.timeout.signal.aborted
       || signal?.aborted) {
-      this.throwFetchError(error, opened.timeoutController, signal, opened.timeoutMs)
+      this.throwFetchError(error, opened.timeout, signal)
     }
   }
 
   private throwFetchError(
     _error: unknown,
-    timeoutController: AbortController,
+    timeout: RequestTimeout,
     signal: AbortSignal | undefined,
-    timeoutMs: number,
   ): never {
-    if (timeoutController.signal.aborted && !signal?.aborted) {
+    if (timeout.signal.aborted && !signal?.aborted) {
+      if (timeout.reason === 'absolute') {
+        throw new AppError(
+          'NETWORK_FAILED',
+          `请求总时长超过上限（${Math.round(timeout.absoluteMsValue / 1000)} 秒），请减小分块或稍后重试`,
+        )
+      }
       throw new AppError(
         'NETWORK_FAILED',
-        `请求超时（${Math.round(timeoutMs / 1000)} 秒），请检查 Base URL 和网络连接`,
+        `请求空闲超时（${Math.round(timeout.idleMsValue / 1000)} 秒无响应），请检查 Base URL、网络连接或减小分块大小`,
       )
     }
     if (signal?.aborted) throw new AppError('TASK_CANCELLED', '任务已取消')
@@ -332,4 +426,17 @@ function extractDelta(data: string): string {
   if (!Array.isArray(choices) || choices.length === 0) return ''
   const delta = choices[0]?.delta?.content
   return typeof delta === 'string' ? delta : ''
+}
+
+export function parseRetryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined
+  const trimmed = header.trim()
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed)
+    if (!Number.isFinite(seconds) || seconds < 0) return undefined
+    return Math.round(seconds * 1000)
+  }
+  const dateMs = Date.parse(trimmed)
+  if (Number.isNaN(dateMs)) return undefined
+  return Math.max(0, dateMs - Date.now())
 }

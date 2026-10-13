@@ -9,7 +9,7 @@ export type VideoContextState =
   | { status: 'loading' }
   | { status: 'unsupported' }
   | { status: 'refresh-required'; tabId: number }
-  | { status: 'no-subtitle'; metadata: VideoMetadata }
+  | { status: 'no-subtitle'; metadata: VideoMetadata; reason?: 'unreliable' }
   | { status: 'ready'; metadata: VideoMetadata; tracks: SubtitleTrack[] }
   | { status: 'failed'; error: PublicAppError }
 
